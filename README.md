@@ -1,6 +1,6 @@
 # Loomwall · LOOW
 
-> 一个开源的 Android 动态壁纸引擎与编辑器。把图层、规则、数据织成一张会动的壁纸。
+> 这是用大肥鱼制作的一个开源的 Android 动态壁纸引擎与编辑器。把图层、规则、数据织成一张会动的壁纸。
 
 在浏览器里完成整张动态壁纸的设计：搭版面、连逻辑、打关键帧、绑定系统数据，
 然后一键推送到手机，立刻在桌面上看到效果。渲染引擎、编辑器、场景格式全部自研，
@@ -26,3 +26,4 @@ Kotlin · OpenGL ES 2.0 · `WallpaperService` · 原生 Web 编辑器（无前�
 
 ## 投喂
 
+<img width="1037" height="1037" alt="tW" src="https://github.com/user-attachments/assets/9fe50346-fe88-4426-970d-6d299e7275bc" />
