@@ -26,4 +26,4 @@ Kotlin · OpenGL ES 2.0 · `WallpaperService` · 原生 Web 编辑器（无前�
 
 ## 投喂
 
-<img width="371" height="727" alt="tW" src="https://github.com/user-attachments/assets/83e9f920-d6f3-4a02-bf2e-60e3bef31615" />
+<img width="371" height="627" alt="tW" src="https://github.com/user-attachments/assets/83e9f920-d6f3-4a02-bf2e-60e3bef31615" />
