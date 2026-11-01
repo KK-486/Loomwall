@@ -1,0 +1,14 @@
+{
+  "formatVersion": "0.2",
+  "engineMinVersion": "0.3.0",
+  "name": "危险区域 · 赛博朋克（视差版）",
+  "author": "LWPKit",
+  "license": "Apache-2.0",
+  "parallax": {
+    "enabled": true,
+    "depth": 45,
+    "amp": 7,
+    "smoothing": 0.18,
+    "deadzone": 0.04
+  }
+}

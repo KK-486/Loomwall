@@ -1,0 +1,17 @@
+{
+  "formatVersion": "0.3",
+  "animations": [],
+  "events": [],
+  "bindings": [],
+  "vars": { "open": 0 },
+  "rules": [
+    {
+      "id": "toggle_panel",
+      "when": { "trigger": "tap", "target": "btn" },
+      "then": [
+        { "type": "setVar", "var": "open", "expr": "1 - open" },
+        { "type": "setVisible", "target": "panel", "expr": "open == 1" }
+      ]
+    }
+  ]
+}
