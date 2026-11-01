@@ -1,0 +1,399 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LWPKit interactions.json",
+  "description": "LWPKit 交互动定义 0.3：动画 + 事件/绑定 + 触发器（vars/rules/functions）。事件模型为「事件源 → 条件/修饰 → 动作」。",
+  "type": "object",
+  "required": [
+    "formatVersion",
+    "animations"
+  ],
+  "properties": {
+    "formatVersion": {
+      "enum": ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6"]
+    },
+    "animations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/animation"
+      }
+    },
+    "vars": {
+      "description": "变量表：名字 → 数字或 {value,min,max}。规则用它承载状态（如菜单是否展开）。",
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "number",
+                "default": 0
+              },
+              "min": {
+                "type": "number",
+                "default": 0
+              },
+              "max": {
+                "type": "number",
+                "default": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "rules": {
+      "description": "规则表：触发源（+条件）→ 动作列表。引擎按顺序匹配执行。",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/rule"
+      }
+    },
+    "functions": {
+      "description": "命名宏：参数 + 动作步骤。只能调用白名单动作，不允许任意代码。",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/function"
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "easing": {
+      "description": "命名缓动或 cubic-bezier(a,b,c,d)，参数均在 0..1。",
+      "type": "string",
+      "pattern": "^(linear|ease|easeIn|easeOut|easeInOut|cubicIn|cubicOut|cubicInOut|cubic-bezier\\(\\s*[0-9.]+\\s*,\\s*[0-9.]+\\s*,\\s*[0-9.]+\\s*,\\s*[0-9.]+\\s*\\))$"
+    },
+    "property": {
+      "description": "可动画属性。新增属性必须同步解析器与渲染器。",
+      "enum": [
+        "x",
+        "y",
+        "scale",
+        "rotationZ",
+        "opacity"
+      ]
+    },
+    "loop": {
+      "description": "once 播完回静态值；onceHold 播完停在尾帧（定格，且不再逐帧重绘）；loop/pingpong 持续播放。",
+      "enum": [
+        "once",
+        "loop",
+        "pingpong",
+        "onceHold"
+      ]
+    },
+    "keyframe": {
+      "type": "object",
+      "required": [
+        "t",
+        "value"
+      ],
+      "properties": {
+        "t": {
+          "description": "归一化时间 0..1，必须严格递增。末帧可以早于 1.0，之后保持末值（便于做“前段移动、后段保持”）。",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "value": {
+          "type": "number"
+        },
+        "easing": {
+          "$ref": "#/$defs/easing",
+          "default": "linear"
+        }
+      },
+      "additionalProperties": true
+    },
+    "track": {
+      "type": "object",
+      "required": [
+        "property",
+        "durationMs",
+        "keyframes"
+      ],
+      "properties": {
+        "property": {
+          "$ref": "#/$defs/property"
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "loop": {
+          "$ref": "#/$defs/loop",
+          "default": "once"
+        },
+        "keyframes": {
+          "description": "允许为空：表示属性已启用但还没打帧（PR/AE 语义），运行时忽略该轨道。",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/keyframe"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "trigger": {
+      "description": "触发方式：always 常驻（壁纸可见即播）、tap 点击命中、func 只被规则/函数里的 playAnimation 调用时播放。滚动/传感器/广播属于阶段 3 及以后。",
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "always",
+            "tap",
+            "func"
+          ]
+        },
+        "targetId": {
+          "description": "需要命中的元素（仅 tap 有意义），缺省为动画的 targetId。",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "animation": {
+      "type": "object",
+      "required": [
+        "id",
+        "targetId",
+        "trigger",
+        "tracks"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "targetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "description": "动画组名称（编辑器展示与选择用；引擎不解析）。同一 targetId 允许有多条动画，靠 name 区分「展开组 / 收回组」。",
+          "type": "string",
+          "maxLength": 40
+        },
+        "trigger": {
+          "$ref": "#/$defs/trigger"
+        },
+        "tracks": {
+          "description": "允许为空：新建动画后可以先不选属性，逐条添加。",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/track"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "rule": {
+      "type": "object",
+      "required": [
+        "id",
+        "when",
+        "then"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "template": {
+          "description": "来源模板标识；引擎忽略，编辑器用来分组。",
+          "type": "string"
+        },
+        "when": {
+          "type": "object",
+          "required": [
+            "trigger"
+          ],
+          "properties": {
+            "trigger": {
+              "enum": [
+                "tap",
+                "var",
+                "minute",
+                "session"
+              ]
+            },
+            "target": {
+              "description": "tap 的目标元素 id；缺省 = 整块画布。",
+              "type": "string"
+            },
+            "var": {
+              "description": "var 触发监听的变量名。",
+              "type": "string"
+            },
+            "expr": {
+              "description": "附加条件表达式（布尔），空 = 恒真。",
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          "additionalProperties": false
+        },
+        "then": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/action"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "action": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "setVar",
+            "setVisible",
+            "setProperty",
+            "playAnimation",
+            "launchApp",
+            "openUri",
+            "call",
+            "for",
+            "while"
+          ]
+        },
+        "var": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "property": {
+          "enum": [
+            "x",
+            "y",
+            "width",
+            "height",
+            "scale",
+            "rotationZ",
+            "opacity"
+          ]
+        },
+        "value": {
+          "type": [
+            "number",
+            "boolean"
+          ]
+        },
+        "expr": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "clip": {
+          "type": "string"
+        },
+        "call": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "repeat": {
+          "description": "循环次数；0 = 不循环。与 intervalMs 配合，由渲染线程按间隔重放该动作（仅壁纸可见时）。",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 999,
+          "default": 0
+        },
+        "intervalMs": {
+          "description": "循环间隔（毫秒），配合 repeat 使用。",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600000,
+          "default": 0
+        },
+        "delayMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000
+        },
+        "package": {
+          "type": "string",
+          "description": "launchApp 的包名"
+        },
+        "uri": {
+          "type": "string",
+          "description": "openUri 的链接"
+        },
+        "from": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "for 循环的起始值表达式",
+          "default": "0"
+        },
+        "to": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "for 循环的结束值表达式（含）",
+          "default": "0"
+        },
+        "step": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "for 循环的步长表达式；为 0 时按 1 处理",
+          "default": "1"
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 20,
+          "description": "while 循环的最大迭代次数；引擎另有一帧内的共享预算"
+        },
+        "do": {
+          "type": "array",
+          "maxItems": 16,
+          "description": "循环体动作（for / while 用）：最多 16 个，最多嵌套 2 层",
+          "items": {
+            "$ref": "#/$defs/action"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "function": {
+      "type": "object",
+      "required": [
+        "steps"
+      ],
+      "properties": {
+        "params": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "steps": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/action"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

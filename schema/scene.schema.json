@@ -1,0 +1,281 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/lwpkit/schema/scene-0.2.json",
+  "title": "LWPKit scene.json",
+  "description": "LWPKit 场景图格式 v0.2（接受 0.1）。坐标单位是画布宽度的百分比：x ∈ [0,100]，y 从顶部向下增长，画布高度单位为 100 * 屏幕高 / 屏幕宽。",
+  "type": "object",
+  "required": ["formatVersion", "root"],
+  "properties": {
+    "formatVersion": {
+      "description": "场景格式版本。0.2 起允许 container 作为子节点（<div> 式分组）；引擎同时接受 0.1。",
+      "enum": ["0.1", "0.2"]
+    },
+    "root": {
+      "$ref": "#/$defs/container"
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "color": {
+      "description": "#RRGGBB 或 #AARRGGBB，十六进制，大小写不限。",
+      "type": "string",
+      "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+    },
+    "unit": {
+      "description": "以画布宽度百分比表示的长度或坐标。",
+      "type": "number"
+    },
+    "positiveUnit": {
+      "description": "必须大于 0 的长度。",
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "scaleUnit": {
+      "description": "缩放倍数。0 表示不可见（渲染时会夹到极小值避免退化）。",
+      "type": "number",
+      "minimum": 0
+    },
+    "id": {
+      "description": "在同一个 scene 内唯一的节点标识。",
+      "type": "string",
+      "minLength": 1
+    },
+    "container": {
+      "type": "object",
+      "description": "容器节点，类似 HTML 的 <div>：把子节点打包成一组。出现在 root 位置时不需要几何；作为子节点时必须给出 x/y/width/height，其子节点坐标**相对容器左上角**。",
+      "required": ["children"],
+      "properties": {
+        "type": {
+          "const": "container"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "visible": {
+          "type": "boolean",
+          "default": true
+        },
+        "background": {
+          "$ref": "#/$defs/color",
+          "default": "#FF0B0D10"
+        },
+        "x": {
+          "$ref": "#/$defs/unit"
+        },
+        "y": {
+          "$ref": "#/$defs/unit"
+        },
+        "width": {
+          "$ref": "#/$defs/positiveUnit"
+        },
+        "height": {
+          "$ref": "#/$defs/positiveUnit"
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "rotationZ": {
+          "description": "绕自身中心旋转的角度（度），正值为顺时针。",
+          "type": "number"
+        },
+        "scale": {
+          "$ref": "#/$defs/scaleUnit"
+        },
+        "clip": {
+          "description": "是否把子元素裁剪在容器框内（等价 CSS overflow: hidden），默认 true。",
+          "type": "boolean",
+          "default": true
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/rect" },
+              { "$ref": "#/$defs/image" },
+              { "$ref": "#/$defs/text" },
+              { "$ref": "#/$defs/container" }
+            ]
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "rect": {
+      "type": "object",
+      "required": ["type", "id", "x", "y", "width", "height", "color"],
+      "properties": {
+        "type": {
+          "const": "rect"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "visible": {
+          "type": "boolean",
+          "default": true
+        },
+        "x": {
+          "$ref": "#/$defs/unit"
+        },
+        "y": {
+          "$ref": "#/$defs/unit"
+        },
+        "width": {
+          "$ref": "#/$defs/positiveUnit"
+        },
+        "height": {
+          "$ref": "#/$defs/positiveUnit"
+        },
+        "shape": {
+          "description": "形状类型，缺省 rect。所有形状都在自身包围盒内绘制。",
+          "enum": ["rect", "ellipse", "triangle", "trapezoid", "polygon", "star", "path"],
+          "default": "rect"
+        },
+        "path": {
+          "description": "shape 为 path 时的 SVG 路径数据（d 属性）。支持 M/L/H/V/C/S/Q/T/A/Z 及其相对形式。",
+          "type": "string"
+        },
+        "hitThrough": {
+          "description": "命中穿透：该节点不参与点击命中，但其子节点仍可命中。用于全屏遮罩/装饰层，",
+          "type": "boolean",
+          "default": false
+        },
+        "feather": {
+          "description": "羽化带宽度，占元素宽度的百分比（0..50），0 = 不羽化。只削四周 alpha，内部像素不变。",
+          "type": "number",
+          "minimum": 0,
+          "default": 0
+        },
+        "gradient": {
+          "description": "渐变填充，空表示纯色。语法：类型:角度:位置#颜色;位置#颜色，例 linear:90:0#FF3366FF;1#FF0B0D10。",
+          "type": "string",
+          "default": ""
+        },
+        "strokeWidth": {
+          "description": "shape 为 path 时的描边宽度（viewBox 单位）。0 = 填充；> 0 = 只描边（线框图标）。",
+          "type": "number",
+          "minimum": 0,
+          "default": 0
+        },
+        "viewBox": {
+          "description": "SVG 的 viewBox，用于把路径归一化到元素包围盒；缺省 0 0 24 24。",
+          "type": "string",
+          "default": "0 0 24 24"
+        },
+        "parallax": {
+          "description": "本层视差景深（0..100）。缺省=0；parallaxMode=global 时该值被忽略，改用 manifest.parallax.depth。",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 0
+        },
+        "parallaxAngle": {
+          "description": "本层视差方向（度）。0=与倾斜同向，180=反向，90/270=垂直错位。仅 parallaxMode=custom 时生效。",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 360,
+          "default": 0
+        },
+        "parallaxMode": {
+          "description": "global=跟随全局（默认）；custom=用本层 parallax/parallaxAmp/parallaxAngle。",
+          "enum": ["global", "custom"],
+          "default": "global"
+        },
+        "parallaxAmp": {
+          "description": "本层视差振幅（% 画布宽度）。缺省用全局振幅。仅 parallaxMode=custom 时生效。",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 12
+        },
+        "sides": {
+          "description": "polygon / star 的顶点数（3..32）。",
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 32,
+          "default": 5
+        },
+        "color": {
+          "$ref": "#/$defs/color"
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1
+        },
+        "rotationZ": {
+          "description": "静态旋转角（度），默认 0。可被动画轨道 rotationZ 覆盖。",
+          "type": "number",
+          "default": 0
+        },
+        "scale": {
+          "description": "静态缩放倍数，默认 1（1 = 原尺寸）。允许 0：表示不可见，渲染时会夹到极小值避免退化矩阵。",
+          "type": "number",
+          "minimum": 0,
+          "default": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "image": {
+      "description": "图片图层。src 指向预设包的 resources（打包时用文件名，单文件包时内嵌为 data URL）。",
+      "type": "object",
+      "required": ["type", "id", "x", "y", "width", "height", "src"],
+      "properties": {
+        "type": { "const": "image" },
+        "id": { "$ref": "#/$defs/id" },
+        "visible": { "type": "boolean", "default": true },
+        "x": { "$ref": "#/$defs/unit" },
+        "y": { "$ref": "#/$defs/unit" },
+        "width": { "$ref": "#/$defs/positiveUnit" },
+        "height": { "$ref": "#/$defs/positiveUnit" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
+        "rotationZ": { "type": "number", "default": 0 },
+        "scale": { "type": "number", "minimum": 0, "default": 1 },
+        "feather": {
+          "description": "羽化带宽度，占元素宽度的百分比（0..50），0 = 不羽化。只削四周 alpha，内部不变。",
+          "type": "number",
+          "minimum": 0,
+          "default": 0
+        },
+        "src": {
+          "description": "资源键（resources 里的文件名 / key）。",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "text": {
+      "description": "文本图层。fontSize 与坐标同单位（画布宽度百分比）；height 由字号与行数推导。",
+      "type": "object",
+      "required": ["type", "id", "x", "y", "width", "height", "text", "fontSize", "color"],
+      "properties": {
+        "type": { "const": "text" },
+        "id": { "$ref": "#/$defs/id" },
+        "visible": { "type": "boolean", "default": true },
+        "x": { "$ref": "#/$defs/unit" },
+        "y": { "$ref": "#/$defs/unit" },
+        "width": { "$ref": "#/$defs/positiveUnit" },
+        "height": { "$ref": "#/$defs/positiveUnit" },
+        "text": {
+          "description": "文本内容，支持 \n 换行。后续可由系统变量绑定替换（如电量、时间）。",
+          "type": "string"
+        },
+        "fontSize": {
+          "description": "字号（画布宽度百分比）。6 约等于 1080px 宽时的 65px。",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "align": { "enum": ["left", "center", "right"], "default": "left" },
+        "color": { "$ref": "#/$defs/color" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
+        "rotationZ": { "type": "number", "default": 0 },
+        "scale": { "type": "number", "minimum": 0, "default": 1 }
+      },
+      "additionalProperties": true
+    }
+  }
+}
