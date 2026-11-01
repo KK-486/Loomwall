@@ -1,0 +1,16 @@
+# Gradle / 构建产物
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+.kotlin/
+
+# 本仓库自带的便携工具链（JDK / Android SDK / Gradle），不入库
+.toolchain/
+
+# 系统垃圾
+.DS_Store
+Thumbs.db
+*.log
