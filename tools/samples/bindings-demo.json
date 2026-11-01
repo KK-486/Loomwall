@@ -1,0 +1,39 @@
+{
+  "_说明": "系统变量绑定示例：可直接替换 presets/active/interactions.json 里的 recordings 内容。需要场景里存在 rect_glow / rect_accent / rect_bar 三个元素。",
+  "formatVersion": "0.1",
+  "animations": [],
+  "bindings": [
+    {
+      "_注释": "电量 0-100% → 绿条缩放 0.6-1.6（越满越大）",
+      "targetId": "rect_glow",
+      "property": "scale",
+      "source": "sys.battery.level",
+      "in": [0, 100],
+      "out": [0.6, 1.6]
+    },
+    {
+      "_注释": "内存占用 0-100% → 蓝条透明度 1.0-0.2（越占越淡，算是个压力指示）",
+      "targetId": "rect_accent",
+      "property": "opacity",
+      "source": "sys.mem.usedPct",
+      "in": [0, 100],
+      "out": [1.0, 0.2]
+    },
+    {
+      "_注释": "存储占用 0-100% → 灰条旋转 -20 到 20 度",
+      "targetId": "rect_bar",
+      "property": "rotationZ",
+      "source": "sys.storage.usedPct",
+      "in": [0, 100],
+      "out": [-20, 20]
+    },
+    {
+      "_注释": "整点小时 0-23 → 绿条 Y 位置（可以搭配动画做“随时间漂移”）",
+      "targetId": "rect_glow",
+      "property": "y",
+      "source": "sys.time.hour",
+      "in": [0, 23],
+      "out": [10, 60]
+    }
+  ]
+}

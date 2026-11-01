@@ -1,0 +1,82 @@
+{
+  "formatVersion": "0.2",
+  "events": [
+    {
+      "id": "ev_toggle",
+      "targetId": "rect_glow",
+      "gesture": "tap",
+      "action": {
+        "type": "toggleVisible",
+        "targetId": "rect_bar"
+      }
+    },
+    {
+      "id": "ev_launch",
+      "targetId": "rect_bar",
+      "gesture": "tap",
+      "action": {
+        "type": "launchApp",
+        "package": "com.android.settings"
+      }
+    }
+  ],
+  "animations": [
+    {
+      "id": "anim_glow_pulse",
+      "targetId": "rect_glow",
+      "trigger": {
+        "type": "tap"
+      },
+      "tracks": [
+        {
+          "property": "rotationZ",
+          "durationMs": 700,
+          "loop": "once",
+          "keyframes": [
+            {
+              "t": 0,
+              "value": 0,
+              "easing": "cubicOut"
+            },
+            {
+              "t": 0.5,
+              "value": 18,
+              "easing": "cubicInOut"
+            },
+            {
+              "t": 1,
+              "value": 0,
+              "easing": "linear"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "anim_accent_breathe",
+      "targetId": "rect_accent",
+      "trigger": {
+        "type": "always"
+      },
+      "tracks": [
+        {
+          "property": "opacity",
+          "durationMs": 1200,
+          "loop": "pingpong",
+          "keyframes": [
+            {
+              "t": 0,
+              "value": 1,
+              "easing": "easeInOut"
+            },
+            {
+              "t": 1,
+              "value": 0.25,
+              "easing": "easeInOut"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
