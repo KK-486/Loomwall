@@ -1,0 +1,414 @@
+{
+  "licenses": [
+    "MIT (Tabler Icons)",
+    "CC0 1.0 (Simple Icons)"
+  ],
+  "icons": [
+    {
+      "name": "home",
+      "label": "主页",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "moon",
+      "label": "夜间模式",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "sun",
+      "label": "白天模式",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "headphones",
+      "label": "耳机",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "calendar",
+      "label": "日历",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "clock",
+      "label": "时钟",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "camera",
+      "label": "相机",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "photo",
+      "label": "图库",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "world",
+      "label": "浏览器",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "settings",
+      "label": "设置",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "music",
+      "label": "音乐",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "phone",
+      "label": "电话",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "message",
+      "label": "消息",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "mail",
+      "label": "邮件",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "user",
+      "label": "用户",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "search",
+      "label": "搜索",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "bell",
+      "label": "通知",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "battery",
+      "label": "电池",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "wifi",
+      "label": "Wi-Fi",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "bluetooth",
+      "label": "蓝牙",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "heart",
+      "label": "收藏",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "star",
+      "label": "星标",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "folder",
+      "label": "文件",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "map-pin",
+      "label": "定位",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "calculator",
+      "label": "计算器",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "cloud",
+      "label": "云",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "link",
+      "label": "链接",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "lock",
+      "label": "锁屏",
+      "kind": "system",
+      "viewBox": "0 0 24 24",
+      "source": "https://tabler.io/icons"
+    },
+    {
+      "name": "brand-wechat",
+      "label": "微信",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-qq",
+      "label": "QQ",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-tiktok",
+      "label": "抖音 / TikTok",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-bilibili",
+      "label": "哔哩哔哩",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-kuaishou",
+      "label": "快手",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-sinaweibo",
+      "label": "微博",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-zhihu",
+      "label": "知乎",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-xiaohongshu",
+      "label": "小红书",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-neteasecloudmusic",
+      "label": "网易云音乐",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-alipay",
+      "label": "支付宝",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-taobao",
+      "label": "淘宝",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-telegram",
+      "label": "Telegram",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-discord",
+      "label": "Discord",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-youtube",
+      "label": "YouTube",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-spotify",
+      "label": "Spotify",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-instagram",
+      "label": "Instagram",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-facebook",
+      "label": "Facebook",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-github",
+      "label": "GitHub",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-googlechrome",
+      "label": "Chrome",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-whatsapp",
+      "label": "WhatsApp",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-x",
+      "label": "X / Twitter",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-netflix",
+      "label": "Netflix",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-steam",
+      "label": "Steam",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-twitch",
+      "label": "Twitch",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-reddit",
+      "label": "Reddit",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-linkedin",
+      "label": "LinkedIn",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-pinterest",
+      "label": "Pinterest",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-soundcloud",
+      "label": "SoundCloud",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-applemusic",
+      "label": "Apple Music",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    },
+    {
+      "name": "brand-googleplay",
+      "label": "Google Play",
+      "kind": "brand",
+      "viewBox": "0 0 24 24",
+      "source": "https://simpleicons.org"
+    }
+  ]
+}

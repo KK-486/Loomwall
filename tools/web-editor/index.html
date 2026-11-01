@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Loomwall · LOOW 预设编辑器</title>
+<style>
+  :root {
+    --bg: #0b0e12;
+    --panel: #12161d;
+    --panel-2: #171d26;
+    --line: #232b36;
+    --text: #c9d3e0;
+    --muted: #6f7b8a;
+    --accent: #3ddc97;
+    --accent-2: #4c8bf5;
+    --warn: #ffdb4d;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+
+  /* 定位到图层时闪一下，方便眼睛跟上 */
+  .row.flash { background: #2a3f2f !important; transition: background .25s; }
+
+  /* 统一滚动条：系统默认是白色宽条，在深色界面里非常突兀 */
+  * { scrollbar-width: thin; scrollbar-color: #2b3644 transparent; }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2b3644; border-radius: 5px;
+    border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #3c4b5c; background-clip: padding-box; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 12px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+  }
+  header .title { font-weight: 600; margin-right: 8px; }
+  header .spacer { flex: 1; }
+  button, select, input {
+    font: inherit; color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: #3a4657; }
+  button.primary { background: #1d3b2d; border-color: #2f6b4f; color: #d8ffe9; }
+  button.danger { background: #3a2020; border-color: #6b3030; color: #ffd7d7; }
+  button.toggle.on { background: #2f6b4f; border-color: #3ddc97; color: #eafff5; }
+  input[type=number] { width: 100%; }
+  main { flex: 1; display: flex; min-height: 0; }
+  .col { display: flex; flex-direction: column; min-height: 0; }
+  .left { width: 246px; border-right: 1px solid var(--line); background: var(--panel); min-width: 246px; }
+  .right { width: 380px; border-left: 1px solid var(--line); background: var(--panel); min-width: 380px; }
+  .center { flex: 1; display: flex; flex-direction: column; min-width: 0; background: #070a0d; }
+  .section { border-bottom: 1px solid var(--line); }
+  .section > .hd {
+    padding: 5px 10px; color: var(--muted); text-transform: none;
+    display: flex; align-items: center; gap: 6px; background: var(--panel);
+  }
+  .section > .hd .spacer { flex: 1; }
+  .scroll { overflow: auto; }
+  .list { padding: 4px 6px 8px; }
+  .row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 8px; border-radius: 6px; cursor: pointer; user-select: none;
+  }
+  .row:hover { background: #1a212b; }
+  .row.sel { background: #1e2a24; outline: 1px solid #2f6b4f; }
+  .row .dot { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 auto; }
+  .row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .meta { color: var(--muted); font-size: 11px; }
+  .canvas-wrap { flex: 1; position: relative; min-height: 0; overflow: hidden; }
+  /* 关系图按钮常驻：它是"画布显示触发链"的独立开关，不由触发器模式决定 */
+  .graph-view-btn { display: inline-flex; }
+  .graph-view-btn.on { background: #1d3550; border-color: #3d6d9e; color: #cfe4ff; }
+  .td-head { display: flex; align-items: center; gap: 6px; padding-bottom: 8px;
+    border-bottom: 1px solid #1f2a36; margin-bottom: 8px; }
+  .td-title { flex: 1 1 auto; font-weight: 600; color: #e6eef7; }
+  .td-id { color: #6f7f90; font-family: ui-monospace, Consolas, monospace; font-size: 10px; }
+  .td-close { flex: 0 0 auto; background: none; border: none; color: #7c8b9c;
+    cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
+  .td-close:hover { color: #fff; }
+  .td-sec { margin: 6px 0; }
+  .td-label { color: #6f7f90; font-size: 10px; margin-bottom: 3px; }
+  .td-node { display: flex; align-items: center; gap: 6px; padding: 5px 7px;
+    background: #111a24; border: 1px solid #24313f; border-radius: 6px; }
+  .td-node.src { border-left: 3px solid #ff2a44; }
+  .td-node.dst { border-left: 3px solid #3f8fbf; }
+  .td-chip { flex: 0 0 auto; font-size: 9px; padding: 1px 5px; border-radius: 3px;
+    background: #1d2733; color: #8aa0b5; }
+  .td-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .td-sub { color: #7c8b9c; font-size: 10px; margin-top: 3px; }
+  .td-arrow { text-align: center; color: #ff2a44; font-size: 11px; padding: 2px 0 4px; }
+  .td-empty { color: #6f7f90; padding: 6px 0; }
+  .td-layer { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+  .td-layer:hover { color: #9dc7e8; }
+  .td-vars { display: flex; flex-wrap: wrap; gap: 4px; }
+  .td-var { font-family: ui-monospace, Consolas, monospace; font-size: 10px;
+    padding: 1px 6px; border-radius: 3px; background: #14202b; color: #8fb8d8;
+    border: 1px solid #24313f; }
+  .preview-panel { z-index: 3; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px;
+    border-radius: 10px; }
+  .preview-panel.dragging { cursor: grabbing; }
+  /* 折叠：只缩放 canvas，蓝点保持在原位可点（缩放整个面板会让蓝点变小/点不到） */
+  #stage { transform-origin: calc(100% + 9px) -9px;
+    transition: transform .24s cubic-bezier(.34, .86, .3, 1), opacity .2s ease; }
+  .preview-panel.collapsed #stage { transform: scale(.03); opacity: 0; }
+  /* 折叠后蓝点保持原样：不放 "+" 之类的符号（用户明确不要白色小十字） */
+  .preview-fold-hint { display: none; }
+  /* 右上角拖拽点：长按后拖动整个预览面板 */
+  .preview-handle { position: absolute; right: -9px; top: -9px; width: 18px; height: 18px;
+    border-radius: 50%; background: #4f8cff; border: 2px solid #0b0f14; cursor: grab;
+    box-shadow: 0 0 0 1px #223; z-index: 5; }
+  .preview-handle:active { cursor: grabbing; }
+  /* 顶部中央的「小刘海」：预览框边缘碰到它才磁吸居中 */
+  .preview-notch { position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+    width: 104px; height: 15px; border-radius: 0 0 9px 9px; z-index: 4;
+    background: linear-gradient(180deg, #1b2530, #232f3d);
+    border: 1px solid #334254; border-top: none;
+    box-shadow: inset 0 -2px 6px rgba(79,140,255,.28); cursor: default; }
+  .preview-notch::after { content: ""; position: absolute; left: 50%; bottom: 4px;
+    transform: translateX(-50%); width: 22px; height: 2px; border-radius: 2px;
+    background: #4f8cff; opacity: .7; }
+  .canvas-wrap.snap-ready .preview-notch { box-shadow: inset 0 -2px 10px rgba(79,140,255,.9); }
+  button.tiny { padding: 2px 8px; font-size: 11px; border-radius: 5px; border: 1px solid #334254;
+    background: #141b24; color: #cdd7e3; cursor: pointer; }
+  button.tiny:hover { background: #1b2530; color: #fff; }
+  button.tiny.danger { color: #ff8a8a; border-color: #5a2b2b; }
+  button.tiny.on { background: #1d4ed8; border-color: #3b82f6; color: #fff; }
+  canvas#stage { background: #11141a; border-radius: 8px; box-shadow: 0 0 0 1px var(--line); cursor: crosshair; }
+  .timeline { flex: 0 0 auto; height: 190px; border-top: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; }
+  .timeline .hd { display: flex; gap: 6px; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+  /* 时间轴主体：左轨道 / 右关键帧面板 并排 */
+  .tl-main { flex: 1; min-height: 0; display: flex; align-items: stretch; }
+  .tl-body { flex: 1 1 auto; min-width: 0; overflow: auto; position: relative; }
+  /* 关键帧设置面板：贴在轨道区右边，而不是挤在右栏最底下 */
+  .tl-kf { flex: 0 0 300px; min-width: 240px; border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .tl-kf .hd { display: flex; gap: 6px; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+  .tl-kf .inspector { flex: 1; overflow: auto; padding: 0 8px 8px; }
+  .tl-track { display: flex; height: 30px; align-items: center; border-bottom: 1px solid #1b222b; }
+  .tl-label { width: 96px; flex: 0 0 auto; padding-left: 8px; color: var(--muted); }
+  .tl-lane { position: relative; flex: 1; height: 100%; }
+  .kf {
+    position: absolute; top: 50%; width: 11px; height: 11px; margin: -6px 0 0 -6px;
+    transform: rotate(45deg); background: var(--accent); border: 1px solid #0b3d2a; cursor: ew-resize;
+  }
+  .kf.sel { background: var(--warn); border-color: #6b5a12; }
+  .kf.start, .kf.end { background: #2f6b4f; }
+  .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--danger); pointer-events: none; }
+  .playhead::before {
+    content: ""; position: absolute; top: 0; left: -5px; border: 6px solid transparent;
+    border-top-color: var(--danger);
+  }
+  /*
+   * 属性行：**固定标签列 + 自适应控件列**的网格。
+   * 之前用 flex，标签宽度写死 54px，遇到"形状 / 顶点数""画布背景色"这种长标签就挤，
+   * 颜色行里 取色块 + 透明度滑条 + 数字 三者还会互相压缩。
+   */
+  .field {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    column-gap: 8px;
+    align-items: center;
+    padding: 4px 10px;
+    min-width: 0;
+  }
+  .field > label {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .field .pair { display: flex; gap: 6px; align-items: center; min-width: 0; }
+  .field .pair > input[type=number] { flex: 0 0 64px; width: 64px; text-align: right; }
+  .field .pair > input[type=range] { flex: 1 1 60px; min-width: 40px; }
+  .field .pair > select { flex: 1 1 auto; min-width: 0; }
+  .field .pair > .icon-btn { flex: 0 0 24px; }
+  .field .pair > .badge { flex: 0 0 auto; white-space: nowrap; }
+  .field .pair > div { min-width: 0; }
+  .field .pair > div > input[type=number] { flex: 0 0 52px; width: 52px; text-align: right; }
+
+  /* 分组分隔：颜色、画布背景这类不参与关键帧的设置单独成块 */
+  .field.sep { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 9px; }
+  .field.section-title { padding-top: 10px; }
+  .field.section-title > label { color: #9fb3c8; font-weight: 600; letter-spacing: .3px; }
+
+  .inspector { padding: 6px 0 16px; overflow-x: hidden; overflow-y: auto; }
+  .col.right { display: flex; flex-direction: column; min-height: 0; }
+  #inspector { flex: 1 1 auto; min-height: 0; }
+  .icon-btn { width: 24px; min-width: 24px; height: 22px; padding: 0; line-height: 1; font-size: 12px; }
+  input[type=number] { min-width: 0; }
+  input[type=range] { min-width: 0; }
+  .hint { color: var(--muted); padding: 4px 10px 8px; }
+  #errors { max-height: 90px; overflow: auto; padding: 4px 10px; color: var(--warn); }
+  #errors div { padding: 2px 0; }
+  .fn-card { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; background: var(--panel-2); }
+  .fn-card.disabled { opacity: .45; }
+  .fn-head { display: flex; align-items: center; gap: 6px; }
+  .fn-head b { font-size: 12px; color: #cfe3ff; }
+  .fn-chip { font-size: 10px; padding: 1px 6px; border-radius: 999px; background: #1d2a3a; color: #8fb4dd; }
+  .fn-desc { color: var(--muted); margin: 3px 0; }
+  .fn-code { display: block; font-family: ui-monospace, Consolas, monospace; font-size: 11px; background: #0e1218; border: 1px solid #232b36; border-radius: 5px; padding: 3px 6px; color: #9fd7b4; overflow-x: auto; white-space: nowrap; }
+  .fn-actions { display: flex; gap: 6px; margin-top: 5px; }
+  .cat-chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); cursor: pointer; }
+  .cat-chip.on { background: #2f6b4f; border-color: #3ddc97; color: #eafff5; }
+  .app-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 6px 0; }
+  button.small { font-size: 11px; padding: 3px 0; }
+  .add-menu { display: none; flex-direction: column; gap: 2px; padding: 4px; margin: 0 8px 4px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; }
+  .add-menu.open { display: flex; }
+  .add-menu button { text-align: left; padding: 5px 8px; }
+  .badge { font-size: 11px; color: var(--muted); }
+  input[type=color] {
+    padding: 0;
+    width: 34px;
+    height: 24px;
+    flex: 0 0 36px;
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  input[type=color]::-webkit-color-swatch-wrapper { padding: 2px; }
+  input[type=color]::-webkit-color-swatch { border: none; border-radius: 4px; }
+/* ================= 触发器工作台（覆盖层） ================= */
+/* 参考 LayerFlow NODE STUDIO 的质感：近黑底 + 深蓝卡片 + 极细边框 + 类型色发光 */
+.studio { position: fixed; inset: 0; z-index: 80; display: flex; flex-direction: column;
+  background: #070b11; color: #c9d8e8;
+  font-family: -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
+.studio[hidden] { display: none; }
+
+/* ---- 顶栏 ---- */
+.studio-top { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid #141d28; background: #0a0f17; flex: 0 0 auto; }
+.st-ghostbtn { background: transparent; border: 1px solid #22303f; color: #93a7bb;
+  border-radius: 7px; padding: 4px 9px; font-size: 11px; cursor: pointer; }
+.st-ghostbtn:hover { border-color: #3b5570; color: #d6e7f7; }
+.studio-brand { display: flex; align-items: center; gap: 8px; }
+.studio-logo { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+  background: linear-gradient(135deg, #7c5cff, #5b8cff); color: #fff; font-size: 13px;
+  box-shadow: 0 4px 14px rgba(124,92,255,.35); }
+.studio-brand-copy { display: flex; flex-direction: column; line-height: 1.15; }
+.studio-brand-copy b { font-size: 12.5px; color: #e6f1fd; }
+.studio-brand-copy i { font-style: normal; font-size: 9.5px; color: #5c7186; letter-spacing: .3px; }
+.studio-scene { font-size: 10px; color: #7d93a8; padding: 3px 9px; border-radius: 20px;
+  border: 1px solid #1b2836; background: #0d151f; }
+.studio-scene b { color: #9fd2b6; font-weight: 500; }
+.st-toolbtn { background: #0e1721; border: 1px solid #1e2c3b; color: #8ea4b9;
+  border-radius: 7px; padding: 5px 10px; font-size: 11px; cursor: pointer; }
+.st-toolbtn:hover { border-color: #2f4a63; color: #cfe2f4; }
+.st-primary { display: inline-flex; align-items: center; gap: 6px;
+  background: linear-gradient(135deg, #7c5cff, #5b8cff); border: 0; color: #fff;
+  border-radius: 8px; padding: 6px 12px; font-size: 11.5px; font-weight: 600; cursor: pointer;
+  box-shadow: 0 4px 16px rgba(124,92,255,.35); }
+.st-primary:hover { filter: brightness(1.08); }
+.st-kbd { font-size: 9px; padding: 1px 5px; border-radius: 4px;
+  background: rgba(255,255,255,.18); font-weight: 400; }
+
+/* ---- 三栏 ---- */
+.studio-body { flex: 1; display: grid; grid-template-columns: 236px minmax(0, 1fr) 322px; min-height: 0; }
+
+/* ---- 左：节点库 ---- */
+.studio-library { display: flex; flex-direction: column; min-height: 0;
+  border-right: 1px solid #131c26; background: #090e15; }
+.studio-side-head { padding: 9px 12px 3px; display: flex; flex-direction: column; gap: 1px; }
+.st-kicker { font-size: 8.5px; letter-spacing: 1.1px; color: #46586a; }
+.studio-side-title { font-size: 12.5px; color: #dbe9f8; font-weight: 600; }
+.studio-side-title b { float: right; font-weight: 500; font-size: 9px; color: #6f849a;
+  border: 1px solid #1d2a38; border-radius: 10px; padding: 1px 6px; }
+.studio-lib-search { padding: 6px 10px 4px; }
+.studio-lib-search input { width: 100%; box-sizing: border-box; padding: 5px 8px; font-size: 11px;
+  background: #0d151e; border: 1px solid #1c2a38; border-radius: 7px; color: #cfe0f0; }
+.studio-lib-search input::placeholder { color: #4a5d70; }
+.studio-lib-tabs { display: flex; gap: 4px; padding: 2px 10px 6px; }
+.studio-lib-tabs button { flex: 1; font-size: 10px; padding: 3px 0; background: #0d151e;
+  border: 1px solid #1c2a38; border-radius: 6px; color: #7d93a8; cursor: pointer; }
+.studio-lib-tabs button.on { background: #16233a; border-color: #35507a; color: #9fc4ef; }
+.studio-lib-tabs button[disabled] { opacity: .45; cursor: not-allowed; }
+.studio-library-scroll { flex: 1; overflow: auto; padding: 0 8px 10px; }
+.studio-lib-foot { padding: 7px 10px 9px; font-size: 9px; line-height: 1.45; color: #48596b;
+  border-top: 1px solid #131c26; }
+
+.st-lib-group { margin-bottom: 8px; }
+.st-lib-head { display: flex; align-items: center; gap: 5px; padding: 6px 3px 4px; }
+.st-lib-head .st-dot { width: 6px; height: 6px; border-radius: 50%; }
+.st-lib-head b { font-size: 10.5px; color: #a9bed2; font-weight: 600; }
+.st-lib-head span.st-count { margin-left: auto; font-size: 9px; color: #52667a; }
+.st-lib-item { display: flex; gap: 8px; align-items: center; padding: 6px 8px; margin-bottom: 3px;
+  border: 1px solid #16202c; border-radius: 8px; background: #0c141d; cursor: grab; }
+.st-lib-item:hover { border-color: #274257; background: #101a25; }
+.st-lib-item:active { cursor: grabbing; }
+.st-lib-icon { width: 24px; height: 24px; flex: 0 0 auto; border-radius: 7px; display: grid;
+  place-items: center; font-size: 12px; background: #0a1219; border: 1px solid #1d2c3c; }
+.st-lib-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.st-lib-copy b { font-size: 11px; color: #d3e3f3; font-weight: 500; }
+.st-lib-copy span { font-size: 9px; color: #536679; line-height: 1.3; }
+
+/* ---- 中：画布 ---- */
+.studio-main { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #070b11; }
+.studio-canvas { position: absolute; inset: 0; overflow: hidden; }
+.studio-playfield { position: absolute; left: 0; top: 0; width: 4000px; height: 3000px;
+  transform-origin: 0 0;
+  background-image: radial-gradient(circle, #131d29 1px, transparent 1px);
+  background-size: 24px 24px; }
+
+.st-chips { position: absolute; right: 12px; top: 10px; display: flex; gap: 5px; z-index: 3; }
+.st-chip { font-size: 9px; color: #647a8f; background: rgba(12,20,29,.9);
+  border: 1px solid #1a2734; border-radius: 6px; padding: 2px 7px; }
+.st-statusbar { position: absolute; left: 12px; bottom: 10px; display: flex; gap: 7px;
+  font-size: 9.5px; color: #5c7186; background: rgba(10,16,23,.9);
+  border: 1px solid #16202c; border-radius: 7px; padding: 3px 9px; z-index: 3; }
+.st-dot { color: #35485c; }
+.st-zoomdock { position: absolute; right: 12px; bottom: 10px; display: flex; align-items: center;
+  gap: 2px; background: rgba(10,16,23,.94); border: 1px solid #16202c; border-radius: 8px;
+  padding: 2px 4px; z-index: 3; }
+.st-zoomdock button { width: 20px; height: 20px; border: 0; background: transparent;
+  color: #8ea4b9; cursor: pointer; font-size: 13px; line-height: 1; border-radius: 5px; }
+.st-zoomdock button:hover { background: #16202c; color: #cfe2f4; }
+.st-zoomdock span { font-size: 9.5px; color: #7d93a8; min-width: 36px; text-align: center; }
+
+/* 图层库每行右侧的「＋」：直接生成图层引用节点 */
+.st-lib-item.on { border-color: #3c6fa8; background: #12202d; }
+.st-lib-item.on .st-lib-copy b { color: #cfe6ff; }
+.st-lib-add { margin-left: auto; flex: 0 0 auto; width: 20px; height: 20px; border-radius: 6px;
+  border: 1px solid #1e3348; background: #0a1219; color: #7fb2dd; font-size: 12px;
+  line-height: 1; cursor: pointer; }
+.st-lib-add:hover { border-color: #35537a; color: #b9dcff; background: #101d29; }
+/* ---- 节点卡 ---- */
+.st-node { position: absolute; width: 244px; border: 1px solid #1c2a38; border-radius: 12px;
+  background: linear-gradient(180deg, #101a25, #0c141d);
+  box-shadow: 0 8px 24px rgba(0,0,0,.55); user-select: none; cursor: grab;
+  padding-top: 3px; overflow: visible; }
+.st-node::before { content: ''; position: absolute; left: 14px; right: 14px; top: 0; height: 2px;
+  border-radius: 0 0 2px 2px; background: #4a90c2; opacity: .9; }
+.st-node.st-cat-source::before { background: linear-gradient(90deg, transparent, #f0b429, transparent); }
+.st-node.st-cat-logic::before { background: linear-gradient(90deg, transparent, #a78bfa, transparent); }
+.st-node.st-cat-action::before { background: linear-gradient(90deg, transparent, #3ddc97, transparent); }
+.st-node:active { cursor: grabbing; }
+.st-node.sel { border-color: #4f8cff;
+  box-shadow: 0 0 0 1px rgba(79,140,255,.7), 0 10px 30px rgba(79,140,255,.22); }
+
+.st-node-head { display: flex; align-items: flex-start; gap: 8px; padding: 9px 10px 7px; }
+.st-node-ico { width: 28px; height: 28px; flex: 0 0 auto; border-radius: 8px; display: grid;
+  place-items: center; font-size: 13px; background: #0a1219; border: 1px solid #1e3348; }
+.st-cat-source .st-node-ico { border-color: #4a3413; color: #f0b429; }
+.st-cat-logic .st-node-ico { border-color: #332a52; color: #a78bfa; }
+.st-cat-action .st-node-ico { border-color: #14382a; color: #3ddc97; }
+.st-node-titlewrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.st-node-titlewrap b { font-size: 12px; color: #e7f2fe; font-weight: 600; }
+.st-node-titlewrap span { font-size: 9.5px; color: #5a6e82; line-height: 1.3; }
+.st-node-menu { border: 0; background: transparent; color: #40536a; cursor: pointer;
+  font-size: 13px; padding: 0 2px; line-height: 1; }
+.st-node-menu:hover { color: #9fc4ef; }
+
+.st-node-body { padding: 0 0 6px; }
+.st-port-row { display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 10px; }
+.st-port-row.out { justify-content: flex-end; }
+.st-port { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #0a1119;
+  flex: 0 0 auto; cursor: crosshair; box-shadow: 0 0 0 1px #1b2a3a; transition: transform .12s, box-shadow .12s; }
+.st-port-row.in .st-port { margin-left: -15px; }
+.st-port-row.out .st-port { margin-right: -15px; }
+.st-port:hover { transform: scale(1.3); box-shadow: 0 0 0 2px rgba(143,208,255,.35); }
+.st-port.compatible { animation: st-pulse 1.1s ease-in-out infinite;
+  box-shadow: 0 0 0 3px rgba(120,220,255,.45), 0 0 12px rgba(120,220,255,.6); }
+@keyframes st-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.45); } }
+.st-port.blocked { opacity: .18; }
+.st-port.ok { transform: scale(1.5); box-shadow: 0 0 0 3px rgba(160,235,255,.6), 0 0 14px rgba(120,220,255,.8); }
+.st-port-pill { font-size: 8px; line-height: 1; padding: 2px 4px; border-radius: 4px;
+  background: rgba(255,255,255,.06); }
+.st-port-label { font-size: 9.5px; color: #93a9bd; }
+
+.st-node-mid { padding: 4px 10px 0; display: flex; flex-direction: column; gap: 5px; }
+.st-inline { display: flex; align-items: center; gap: 6px; }
+.st-inline-label { font-size: 9.5px; color: #64798e; flex: 0 0 46px; }
+.st-inline input, .st-inline select { flex: 1; min-width: 0; font-size: 10.5px; height: 22px;
+  padding: 0 6px; background: #0a1119; border: 1px solid #1a2836; border-radius: 6px; color: #cfe0f0; }
+.st-inline input:focus, .st-inline select:focus { outline: none; border-color: #35507a; }
+.st-node-hint { font-size: 9px; color: #3f5163; }
+
+.st-node-foot { padding: 6px 10px 8px; font-size: 9px; color: #4a5d70; line-height: 1.45;
+  border-top: 1px solid #131c26; margin-top: 4px; }
+
+/* ---- 连线 ---- */
+.st-wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.st-wire { fill: none; stroke-width: 1.6; opacity: .95; filter: drop-shadow(0 0 3px currentColor); }
+.st-wire-temp { stroke-width: 1.8; stroke-dasharray: 5 4; filter: drop-shadow(0 0 4px currentColor); }
+
+/* ---- 从库里拖出的幽灵卡 ---- */
+/* 手势多选 */
+.st-chips-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+.st-gchip { font-size: 9.5px; padding: 3px 7px; border-radius: 6px; cursor: pointer;
+  background: #0a1119; border: 1px solid #1a2836; color: #7d93a8; }
+.st-gchip:hover { border-color: #2c4256; color: #a9bed2; }
+.st-gchip.on { background: rgba(61,220,151,.14); border-color: #2a6b52; color: #6ee7b7; }
+.st-inline.col { align-items: flex-start; flex-direction: column; gap: 3px; }
+.st-inline-col { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.st-inline-note { font-size: 8.5px; color: #46596d; }
+.st-port-empty { font-size: 9px; color: #3c4d5f; padding: 2px 10px 4px; }
+.st-port.wired { box-shadow: 0 0 0 2px rgba(61,220,151,.35); }
+/* ---- 连线的点选与右键菜单 ---- */
+/* ---- 执行日志：逐节点明细（RUN 卡片） ---- */
+.st-run-head { display: flex; align-items: center; gap: 8px; padding: 5px 2px 7px;
+  border-bottom: 1px solid #131c26; margin-bottom: 6px; }
+.st-run-badge { font-size: 8.5px; font-weight: 600; letter-spacing: .4px; color: #7dd3fc;
+  background: rgba(56,189,248,.12); border: 1px solid #1e4a63; border-radius: 5px; padding: 1px 6px; }
+.st-run-time { font-size: 9px; color: #4f6275; }
+.st-run-topo { font-size: 8.5px; color: #465a6e; letter-spacing: .3px; }
+.st-run-step { display: flex; gap: 6px; padding: 5px 2px; border-bottom: 1px solid rgba(19,28,38,.7); }
+.st-run-idx { flex: 0 0 16px; font-size: 8.5px; color: #3d4e60; padding-top: 1px; }
+.st-run-ico { flex: 0 0 20px; height: 20px; border-radius: 5px; display: grid; place-items: center;
+  font-size: 10px; background: #0a1219; border: 1px solid #1b2836; }
+.st-run-copy { flex: 1; min-width: 0; }
+.st-run-title { display: flex; align-items: center; gap: 5px; }
+.st-run-name { font-size: 10px; color: #cfe0f0; }
+.st-run-cat { font-size: 8px; padding: 0 4px; border-radius: 3px; line-height: 1.5; }
+.st-run-cat.cat-source { color: #7fb2dd; background: rgba(74,144,194,.14); }
+.st-run-cat.cat-logic { color: #b8a5f5; background: rgba(167,139,250,.14); }
+.st-run-cat.cat-action { color: #6ee7b7; background: rgba(61,220,151,.14); }
+.st-run-detail { font-size: 9px; color: #6f8499; line-height: 1.5; margin-top: 1px;
+  word-break: break-word; }
+.st-run-step.ok .st-run-detail { color: #7f93a8; }
+.st-run-step.act .st-run-ico { border-color: #1d4a37; }
+.st-run-step.act .st-run-detail { color: #6ee7b7; }
+.st-run-step.skip { opacity: .62; }
+.st-run-step.skip .st-run-detail { color: #5c7085; }
+.st-run-step.fail .st-run-ico { border-color: #5c2130; }
+.st-run-step.fail .st-run-detail { color: #ff8b9b; }
+.st-run-summary { margin-top: 7px; padding-top: 6px; border-top: 1px solid #131c26;
+  font-size: 9px; color: #7d93a8; }
+/* ---- 规则 JSON 预览弹层 ---- */
+.st-modal { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center; }
+.st-modal[hidden] { display: none; }
+.st-modal-backdrop { position: absolute; inset: 0; background: rgba(3,6,10,.72); }
+.st-modal-card { position: relative; width: min(780px, 86vw); max-height: 78vh; display: flex;
+  flex-direction: column; background: #0c141d; border: 1px solid #1e3247; border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0,0,0,.65); overflow: hidden; }
+.st-modal-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border-bottom: 1px solid #16202c; font-size: 11.5px; color: #dbe9f8; }
+.st-modal-meta { font-size: 10px; color: #7d93a8; }
+.st-modal-body { flex: 1; margin: 0; padding: 12px 14px; overflow: auto;
+  font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; line-height: 1.6;
+  color: #b8cbe0; white-space: pre; }
+/* 悬浮预览窗的标题条 */
+.canvas-wrap.studio-float .st-float-bar { position: absolute; left: 0; right: 0; top: 0; height: 22px;
+  display: flex; align-items: center; padding: 0 8px; cursor: grab; z-index: 8;
+  background: linear-gradient(180deg, #16232f, #101a25); border-bottom: 1px solid #1e3247; }
+.canvas-wrap.studio-float .st-float-bar:active { cursor: grabbing; }
+.st-float-title { font-size: 9.5px; color: #7d93a8; letter-spacing: .2px; }
+.canvas-wrap.studio-float::before { display: none; }
+
+/* 连线：命中区加宽，悬停与选中都要明显 */
+.st-wire-hit { fill: none; stroke: transparent; stroke-width: 18; pointer-events: stroke; cursor: pointer; }
+.st-wire-hit:hover + .st-wire { stroke-width: 3.2; filter: drop-shadow(0 0 8px currentColor) brightness(1.35); }
+/* 选中态要压过悬停态：选择器权重更高，避免"选了还是 3.2px" */
+.st-wires path.st-wire.sel { stroke-width: 4; stroke-dasharray: 9 7;
+  filter: drop-shadow(0 0 10px currentColor) brightness(1.55);
+  animation: st-wire-flow .9s linear infinite; }
+@keyframes st-wire-flow { to { stroke-dashoffset: -16; } }.st-edge-menu { position: fixed; z-index: 300; min-width: 148px; padding: 4px;
+  background: #101a25; border: 1px solid #24384c; border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.6); }
+.st-edge-menu-item { display: block; width: 100%; text-align: left; font-size: 11px;
+  padding: 6px 9px; border: 0; border-radius: 6px; background: transparent;
+  color: #d7e6f5; cursor: pointer; }
+.st-edge-menu-item:hover { background: rgba(255,90,110,.16); color: #ff8b9b; }
+.st-ghost { position: fixed; z-index: 200; display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 9px; background: rgba(16,26,37,.96);
+  border: 1px solid #3b5978; color: #dbe9f8; font-size: 11px; pointer-events: none;
+  box-shadow: 0 10px 28px rgba(0,0,0,.6); }
+
+/* ---- 右栏面板 ---- */
+.studio-right { display: flex; flex-direction: column; gap: 8px; padding: 8px;
+  min-height: 0; border-left: 1px solid #131c26; background: #090e15; overflow: auto; }
+.st-panel { display: flex; flex-direction: column; min-height: 0;
+  background: #0c141d; border: 1px solid #16202c; border-radius: 10px; }
+.st-param-panel { flex: 0 0 auto; max-height: 46%; }
+.st-log-panel { flex: 1 1 auto; min-height: 140px; }
+.st-panel-head { display: flex; align-items: center; gap: 6px; padding: 7px 10px;
+  border-bottom: 1px solid #131c26; font-size: 10.5px; color: #a9bed2; }
+.st-panel-head > span:first-child { flex: 1; }
+.st-badge { font-size: 8.5px; padding: 1px 6px; border-radius: 10px;
+  background: #0a1219; border: 1px solid #1c2a38; color: #5f7488; }
+.st-badge.live { color: #3ddc97; border-color: #1d4a37; background: rgba(61,220,151,.08); }
+.st-panel-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 7px; }
+.st-sim-row { display: flex; align-items: center; gap: 6px; font-size: 10px; color: #6f8498; }
+.st-sim-row label { flex: 0 0 52px; }
+.st-sim-row input[type=range] { flex: 1; height: 3px; accent-color: #4a90c2; }
+.st-sim-row input[type=number], .st-sim-row select { flex: 1; min-width: 0; height: 22px;
+  background: #0a1119; border: 1px solid #1a2836; border-radius: 6px; color: #cfe0f0;
+  font-size: 10.5px; padding: 0 6px; }
+.st-sim-val { flex: 0 0 auto; font-size: 9px; color: #8299ae; min-width: 30px; text-align: right; }
+.st-foot-note { font-size: 8.5px; color: #42556a; line-height: 1.4; }
+.studio-params { padding: 8px 10px; overflow: auto; }
+.st-param-title { font-size: 11.5px; color: #dbe9f8; margin-bottom: 2px; }
+.st-param-desc { font-size: 9px; color: #52667b; margin-bottom: 8px; line-height: 1.4; }
+.st-param-row { margin-bottom: 6px; }
+.st-param-row label { display: block; font-size: 9px; color: #6b8098; margin-bottom: 2px; }
+.st-param-row input, .st-param-row select { width: 100%; height: 24px; box-sizing: border-box;
+  background: #0a1119; border: 1px solid #1a2836; border-radius: 6px; color: #cfe0f0;
+  font-size: 10.5px; padding: 0 7px; }
+.studio-log { flex: 1; overflow: auto; padding: 7px 10px;
+  font-family: ui-monospace, Consolas, monospace; font-size: 9.5px; }
+.st-log-row { display: flex; gap: 6px; padding: 2px 0; color: #7d93a8; line-height: 1.45; }
+.st-log-row.warn { color: #e0a33f; }
+.st-log-row.error { color: #ff5a6e; }
+.st-log-time { color: #3f5163; flex: 0 0 auto; }
+.studio-log .hint { font-family: none; color: #42556a; font-size: 9.5px; line-height: 1.6; }
+.st-legend { margin-top: 10px; padding-top: 8px; border-top: 1px solid #131c26; }
+.st-legend b { display: block; font-size: 9px; color: #6b8098; margin-bottom: 5px; }
+.st-legend-item { display: inline-flex; align-items: center; gap: 4px; margin: 0 8px 4px 0;
+  font-size: 9px; color: #7d93a8; }
+.st-legend-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+
+/* 工作台里被搬进来的预览面板：变成可自由摆放的悬浮窗 */
+.canvas-wrap.studio-float { position: absolute !important; z-index: 6; margin: 0;
+  border: 1px solid #1e3247; border-radius: 12px; background: #0a0f15; overflow: hidden;
+  box-shadow: 0 14px 40px rgba(0,0,0,.65); }
+.canvas-wrap.studio-float::before { content: '预览 · 可拖动'; position: absolute; left: 10px; top: 5px;
+  font-size: 9px; color: #4e6377; z-index: 7; pointer-events: none; }
+  /* 临时提示（发送到手机之类）显示在错误区，保留几秒 */
+  #errors .status-line { color: #6ee7b7; font-weight: 500; margin-top: 3px; }
+  /* 时间轴：动画组选择器 */
+  .tl-sep { width: 1px; height: 16px; background: var(--line); margin: 0 4px; }
+  .tl-lab { font-size: 11px; color: var(--muted); }
+  #clip-group { max-width: 190px; }
+  /* 时长 0 时缓动不可用：置灰 + 不可点，避免"选了没反应"的误解 */
+  .st-inline select.is-off, .st-param-row select.is-off {
+    opacity: .42; cursor: not-allowed; filter: grayscale(.4);
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="title">Loomwall 预设编辑器</span>
+  <button id="btn-new">新建</button>
+  <button id="btn-import">导入 JSON</button>
+  <button id="btn-export-bundle" class="primary" title="手机端「导入预设」就选这个文件">导出预设（单文件·手机用）</button>
+  <button id="btn-export-files" title="给预设文件夹 / KLWP 风格包结构用，手机导入不需要">导出 3 个 JSON</button>
+  <input id="phone-addr" placeholder="手机地址 192.168.x.x:8765" title="打开手机上的 LOOW，抽屉里会显示这个地址" style="width:170px" />
+  <button id="btn-send-phone" class="primary">发送到手机</button>
+  <span class="badge" id="phone-state">未连接手机</span>
+  <span class="spacer"></span>
+  <button id="btn-studio" title="打开触发器工作台：用节点编排 源 → 逻辑 → 动作">🧩 触发器</button>
+        <span class="badge" id="build"></span>
+  <span class="badge" id="stat"></span>
+</header>
+
+<div id="fatal" style="display:none;background:#3a2020;color:#ffd7d7;padding:6px 10px;border-bottom:1px solid #6b3030;white-space:pre-wrap;font-family:ui-monospace,Consolas,monospace;font-size:11px"></div>
+<div id="icon-picker" style="display:none;position:fixed;inset:0;background:rgba(4,6,9,.72);z-index:50;align-items:center;justify-content:center">
+  <div style="width:min(720px,92vw);max-height:82vh;display:flex;flex-direction:column;background:#12161d;border:1px solid #232b36;border-radius:12px;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #232b36">
+      <b style="font-size:13px">图标库</b>
+      <span class="badge">Tabler Icons · MIT</span>
+      <span style="flex:1"></span>
+      <select id="icon-kind" title="图标类型">
+        <option value="all">全部</option>
+        <option value="system">系统</option>
+        <option value="brand">品牌</option>
+      </select>
+      <select id="icon-color" title="图标颜色">
+        <option value="#FFFFFF">白色</option>
+        <option value="#2B2B2B">深色</option>
+        <option value="#F2D98A">主题黄</option>
+      </select>
+      <button id="icon-close">关闭</button>
+    </div>
+    <div style="padding:8px 12px"><input id="icon-search" placeholder="搜索：相机 / 设置 / 浏览器…" style="width:100%" /></div>
+    <div id="icon-grid" class="scroll" style="flex:1;padding:8px 12px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:8px"></div>
+  </div>
+</div>
+<div id="shape-picker" style="display:none;position:fixed;inset:0;background:rgba(4,6,9,.72);z-index:50;align-items:center;justify-content:center">
+  <div style="width:min(640px,92vw);max-height:78vh;display:flex;flex-direction:column;background:#12161d;border:1px solid #232b36;border-radius:12px;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #232b36">
+      <b style="font-size:13px">形状库</b>
+      <span class="badge">点一下即插入</span>
+      <span style="flex:1"></span>
+      <button id="shape-close">关闭</button>
+    </div>
+    <div style="padding:8px 12px"><input id="shape-search" placeholder="搜索：圆 / 三角 / 星…" style="width:100%" /></div>
+    <div id="shape-grid" class="scroll" style="flex:1;padding:8px 12px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:8px"></div>
+  </div>
+</div>
+<div id="svg-picker" style="display:none;position:fixed;inset:0;background:rgba(4,6,9,.72);z-index:50;align-items:center;justify-content:center">
+  <div style="width:min(760px,94vw);max-height:84vh;display:flex;flex-direction:column;background:#12161d;border:1px solid #232b36;border-radius:12px;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #232b36">
+      <b style="font-size:13px">SVG</b>
+      <span class="badge">编译成 PNG 后插入</span>
+      <span style="flex:1"></span>
+      <label class="badge" style="cursor:pointer">导入文件
+        <input id="mask-file" type="file" accept="image/*" style="display:none" />
+  <input id="svg-file" type="file" accept=".svg,image/svg+xml" style="display:none" />
+      </label>
+      <select id="svg-mode" title="插入方式">
+        <option value="auto" selected>自动</option>
+        <option value="vector">矢量</option>
+        <option value="raster">位图</option>
+      </select>
+      <select id="svg-size" title="输出尺寸">
+        <option value="128">128px</option>
+        <option value="256" selected>256px</option>
+        <option value="512">512px</option>
+      </select>
+      <button id="svg-close">关闭</button>
+    </div>
+    <div style="display:flex;gap:12px;padding:12px;min-height:0;flex:1">
+      <div style="flex:1;display:flex;flex-direction:column;gap:6px;min-width:0">
+        <div class="badge">粘贴或编辑 SVG 代码</div>
+        <textarea id="svg-code" spellcheck="false" style="flex:1;min-height:220px;font-family:ui-monospace,Consolas,monospace;font-size:11px;background:#0e1218;color:#c9d3e0;border:1px solid #232b36;border-radius:6px;padding:8px;resize:vertical">&lt;svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2"&gt;
+  &lt;circle cx="12" cy="12" r="9" /&gt;
+&lt;/svg&gt;</textarea>
+        <div style="display:flex;gap:8px">
+          <button id="svg-compile" class="primary">编译预览</button>
+          <button id="svg-insert">插入画布</button>
+        </div>
+        <div id="svg-msg" class="hint"></div>
+      </div>
+      <div style="width:220px;display:flex;flex-direction:column;gap:6px;align-items:center;justify-content:flex-start">
+        <div class="badge">预览</div>
+        <div id="svg-preview" style="width:200px;height:200px;border:1px dashed #2b3542;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#0e1218"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<main>
+  <aside class="col left">
+    <div class="section" style="flex:1;display:flex;flex-direction:column;min-height:0">
+      <div class="hd">图层
+        <span class="spacer"></span>
+        <button id="btn-add-layer" title="添加图层">＋</button>
+        <button id="btn-del-layer" class="danger" title="删除选中图层">−</button>
+      </div>
+      <div id="add-menu" class="add-menu">
+        <button data-add="shape">形状…</button>
+        <button data-add="container">容器</button>
+        <button data-add="image">图片</button>
+        <button data-add="text">文本</button>
+        <button data-add="icon">图标</button>
+        <button data-add="svg">SVG…</button>
+      </div>
+      <div class="list scroll" id="layer-list" style="flex:1;min-height:0"></div>
+      <div class="badge" style="padding:4px 10px;opacity:.6">拖动图层改层级 · 双击图层名重命名 · 拖到容器中间放进容器 · 越靠下越靠上</div>
+    </div>
+  </aside>
+
+  <section class="col center">
+    <div class="canvas-wrap">
+      <div class="preview-notch" id="preview-notch" title="把预览拖到碰住这里：磁吸居中并恢复 100% 比例"></div>
+      <div class="preview-panel" id="preview-panel">
+        <div class="preview-handle" id="preview-handle" title="长按拖动可移动预览；双击预览可折叠/展开"></div>
+        <canvas id="stage"></canvas>
+        <div class="preview-fold-hint">预览已折叠 · 双击展开</div>
+      </div>
+    </div>
+    <div class="timeline">
+      
+      <div id="timeline-mode" style="flex:1;min-height:0;display:flex;flex-direction:column">
+      <div class="hd">
+        <button id="btn-play" class="toggle">▶ 播放</button>
+        <span class="badge" id="tl-info">播放头 0.00</span>
+        <span class="tl-sep"></span>
+        <label class="tl-lab">动画组</label>
+        <select id="clip-group" title="同一图层可以有多个动画组，先选组再补帧"></select>
+        <button id="btn-group-new" title="给当前图层新建一个动画组">＋组</button>
+        <button id="btn-group-rename" title="重命名当前动画组">改名</button>
+        <button id="btn-group-del" class="danger" title="删除当前动画组">删组</button>
+        <span class="spacer"></span>
+        <select id="trigger" title="触发方式">
+          <option value="always">常驻（可见即播）</option>
+          <option value="tap">点击触发</option>
+          <option value="func">函数触发（被调用时播）</option>
+        </select>
+        <select id="loop" title="循环">
+          <option value="once">播放一次</option>
+          <option value="onceHold">播放一次并停在结尾</option>
+          <option value="loop">循环</option>
+          <option value="pingpong">往返</option>
+        </select>
+        <input id="duration" type="number" min="1" step="50" style="width:78px" title="时长 ms" />
+        <button id="btn-add-kf">在当前时间插帧</button>
+        <button id="btn-del-kf" class="danger">删除帧</button>
+      </div>
+      <div class="tl-main">
+        <div class="tl-body" id="tl-body"></div>
+        <!-- 关键帧设置面板：放在轨道区右边，和轨道对照着看 -->
+        <div class="tl-kf">
+          <div class="hd">关键帧</div>
+          <div class="inspector" id="kf-inspector"></div>
+        </div>
+      </div>
+      </div>
+      
+  </section>
+
+  <aside class="col right">
+    <div class="section">
+      <div class="hd">属性</div>
+      <div class="inspector scroll" id="inspector"></div>
+    </div>
+    <div class="section" style="flex:0 0 auto">
+      <div class="hd">校验</div>
+      <div id="errors"></div>
+    </div>
+    <div class="section" style="flex:0 0 auto;display:flex;flex-direction:column;min-height:200px;max-height:38vh">
+      <div class="hd">交互（触摸事件）
+        <span class="spacer"></span>
+        <button id="btn-add-toggle">+ 点击切换</button>
+        <button id="btn-add-launch">+ 启动应用</button>
+        <button id="btn-add-uri">+ 打开链接</button>
+      </div>
+      <div id="event-list" class="scroll" style="flex:1;padding:4px 8px 8px"></div>
+    </div>
+    <div class="section" id="bindings-section" data-hidden="1" style="flex:0 0 auto;display:none;flex-direction:column;min-height:180px;max-height:34vh">
+      <div class="hd">绑定（数据 → 图层）
+        <span class="spacer"></span>
+        <label style="font-size:11px;color:#9a9aad;display:flex;align-items:center;gap:3px;margin-right:6px">
+          <input type="checkbox" id="bind-preview" checked /> 预览
+        </label>
+        <button id="btn-add-binding">+ 新建绑定</button>
+      </div>
+      <div id="binding-list" class="scroll" style="flex:1;padding:6px 8px 8px"></div>
+    </div>
+    <div class="section" style="flex:1 1 auto;display:flex;flex-direction:column;min-height:240px">
+      <div class="hd">变量 / 函数
+        <span class="spacer"></span>
+        <span class="badge" id="insert-target">插入目标：未选中文本</span>
+      </div>
+      <div style="padding:4px 8px">
+        <input id="var-search" placeholder="搜索：电量 / 时间 / 电池 / 内存…" style="width:100%" />
+      </div>
+      <div id="var-cats" style="padding:0 8px 4px;display:flex;flex-wrap:wrap;gap:4px"></div>
+      <div id="var-list" class="scroll" style="flex:1;padding:0 8px 8px"></div>
+    </div>
+  </aside>
+</main>
+
+<input id="file" type="file" accept=".json,application/json" style="display:none" />
+<input id="image-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" />
+<!-- ================= 触发器工作台（全屏覆盖层） ================= -->
+<div class="studio" id="studio" hidden>
+  <div class="studio-top">
+    <button id="btn-studio-back" class="st-ghostbtn" title="返回主编辑器（Esc）">← 返回编辑器</button>
+    <span class="studio-brand">
+      <span class="studio-logo">⌘</span>
+      <span class="studio-brand-copy">
+        <b>触发器工作台</b>
+        <i>NODE STUDIO · 源 → 逻辑 → 动作</i>
+      </span>
+    </span>
+    <span class="studio-scene">● 场景 <b id="studio-scene-name">当前预设</b> ｜ 本地原型</span>
+    <span class="spacer"></span>
+    <button class="st-toolbtn" id="btn-studio-clear" title="清空画布上的所有节点与连线">🗑 清空画布</button>
+    <button class="st-toolbtn" id="btn-studio-reset-view" title="缩放与位置复位">↺ 重置视图</button>
+    <button class="st-toolbtn" id="btn-studio-json" title="查看编译出来的规则（引擎格式）">{ } 查看 JSON</button>
+    <button class="st-primary" id="btn-studio-run" title="编译成规则并模拟运行一遍">▶ 模拟运行 <span class="st-kbd">Ctrl ↵</span></button>
+  </div>
+
+  <div class="studio-body">
+    <aside class="studio-library">
+      <div class="studio-side-head">
+        <span class="st-kicker">NODE LIBRARY</span>
+        <span class="studio-side-title">节点库 <b id="studio-lib-count">21</b></span>
+      </div>
+      <div class="studio-lib-search">
+        <input id="studio-search" placeholder="搜索节点…" />
+      </div>
+      <div class="studio-lib-tabs">
+        <button class="on" data-lib-tab="node" title="逻辑节点：源 / 逻辑 / 动作">节点</button>
+        <button data-lib-tab="layer" title="当前预设里的图层，拖进画布生成「图层引用」节点">图层</button>
+      </div>
+      <div class="studio-library-scroll" id="studio-library-scroll"></div>
+      <div class="studio-lib-foot">拖入画布 或 单击节点快速添加。拖动节点可移动，拖动彩色端口可连线。</div>
+    </aside>
+
+    <section class="studio-main">
+      <div class="studio-canvas" id="studio-canvas">
+        <div class="studio-playfield" id="studio-playfield"></div>
+
+        <div class="st-chips">
+          <span class="st-chip">拖拽空白</span>
+          <span class="st-chip">平移</span>
+          <span class="st-chip">滚轮 · 缩放</span>
+          <span class="st-chip">Del 删除</span>
+        </div>
+
+        <div class="st-statusbar">
+          <span id="studio-stats">0 节点 · 0 连线</span>
+          <span class="st-dot">·</span>
+          <span id="studio-status-hint">场景已载入</span>
+        </div>
+
+        <div class="st-zoomdock">
+          <button data-studio-zoom="out">−</button>
+          <span id="studio-zoom-label">100%</span>
+          <button data-studio-zoom="in">+</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="studio-right">
+      <section class="st-panel">
+        <div class="st-panel-head">
+          <span>⚡ 全局模拟输入</span>
+          <span class="st-badge live" id="studio-live-badge">● LIVE</span>
+        </div>
+        <div class="st-panel-body">
+          <div class="st-sim-row">
+            <label>🔋 电量</label>
+            <input type="range" id="studio-sim-battery" min="0" max="100" value="18" />
+            <span class="st-sim-val" id="studio-sim-battery-val">18%</span>
+          </div>
+          <div class="st-sim-row">
+            <label>🕐 时间</label>
+            <input type="number" id="studio-sim-hour" min="0" max="23" value="20" />
+            <span class="st-sim-val">时</span>
+          </div>
+          <div class="st-sim-row">
+            <label>🖐 手势</label>
+            <select id="studio-sim-gesture">
+              <option value="tap">单击</option>
+              <option value="doubleTap">双击</option>
+              <option value="longPress">长按</option>
+          </select>
+          </div>
+          <div class="st-sim-row">
+            <label>👆 触摸</label>
+            <input type="number" id="studio-sim-x" value="540" title="触摸 X" />
+            <input type="number" id="studio-sim-y" value="320" title="触摸 Y" />
+          </div>
+          <div class="st-foot-note">模拟值只影响「模拟运行」，不会写进预设。</div>
+        </div>
+      </section>
+
+      <section class="st-panel st-param-panel">
+        <div class="st-panel-head">
+          <span>⚙ 节点参数</span>
+          <span class="st-badge" id="studio-param-badge">未选中</span>
+        </div>
+        <div class="studio-params" id="studio-params"></div>
+      </section>
+
+      <section class="st-panel st-log-panel">
+        <div class="st-panel-head">
+          <span>▤ 执行日志</span>
+          <span class="st-badge" id="studio-log-badge">IDLE</span>
+        </div>
+        <div class="studio-log" id="studio-log"></div>
+      </section>
+    </aside>
+  </div>
+  <!-- 规则 JSON 预览 -->
+  <div class="st-modal" id="studio-json-modal" hidden>
+    <div class="st-modal-backdrop" id="studio-json-backdrop"></div>
+    <section class="st-modal-card" role="dialog" aria-modal="true">
+      <header class="st-modal-head">
+        <b>{ } 编译结果 · 引擎规则格式</b>
+        <span id="studio-json-meta" class="st-modal-meta"></span>
+        <span class="spacer"></span>
+        <button class="st-toolbtn" id="studio-json-copy">复制</button>
+        <button class="st-ghostbtn" id="studio-json-close">关闭</button>
+      </header>
+      <pre class="st-modal-body" id="studio-json-body"></pre>
+    </section>
+  </div>
+</div>
+<!-- 保存对话框：命名 + 位置（下载到电脑 / 发送到手机） -->
+<div class="st-modal" id="save-modal" hidden>
+  <div class="st-modal-backdrop" id="save-modal-backdrop"></div>
+  <div class="st-modal-card" style="width:min(460px,88vw);max-height:none">
+    <div class="st-modal-head">
+      <strong>保存壁纸</strong>
+      <span class="st-modal-meta">名字会显示在手机的壁纸库里</span>
+    </div>
+    <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
+      <label style="font-size:12px;color:#9aa7b8">名称
+        <input id="save-name" type="text" maxlength="40" style="width:100%;margin-top:4px;box-sizing:border-box" />
+      </label>
+      <div style="font-size:12px;color:#9aa7b8">保存位置</div>
+      <label style="font-size:13px"><input type="radio" name="save-target" value="file" checked /> 下载到电脑（.lwpkit.json）</label>
+      <label style="font-size:13px"><input type="radio" name="save-target" value="phone" /> 发送到手机（自动加入壁纸库）</label>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">
+        <button id="save-cancel">取消</button>
+        <button id="save-ok" class="primary">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="catalog.js?v=20261101bind4"></script>
+<!-- 工作台与编译层都要先于 editor.js：editor.js 末尾会调用 setupStudio() / setupStudioCompile() -->
+<script src="studio.js?v=20261101bind4"></script>
+<script src="studio-compile.js?v=20261101bind4"></script>
+<script src="editor.js?v=20261101bind4"></script>
+</body>
+</html>
