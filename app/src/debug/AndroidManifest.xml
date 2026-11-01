@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    仅 debug 构建使用：把同一套 EGL/GLES2 引擎挂到 SurfaceView 上，
+    用于在没有动态壁纸选择器的环境（如 MuMu 模拟器）里验证渲染管线。
+
+    release 构建不包含此文件，因此不影响阶段 0 的交付边界。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name=".preview.PreviewActivity"
+            android:exported="true"
+            android:label="渲染自检"
+            android:theme="@style/Theme.LOOW" />
+    </application>
+</manifest>

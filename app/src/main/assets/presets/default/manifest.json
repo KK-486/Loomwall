@@ -1,0 +1,8 @@
+{
+  "formatVersion": "0.2",
+  "engineMinVersion": "0.3.0",
+  "name": "默认场景（阶段 0）",
+  "author": "LWPKit",
+  "license": "Apache-2.0",
+  "description": "一个背景 + 三个矩形：验证 GLES2 管线、透明度混合与百分比坐标系统；点击绿条触发缩放+旋转动画，点击蓝条触发透明度呼吸。"
+}

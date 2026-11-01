@@ -1,0 +1,66 @@
+{
+  "formatVersion": "0.1",
+  "root": {
+    "id": "root",
+    "type": "container",
+    "background": "#FF0B0F14",
+    "children": [
+      {
+        "id": "rect_glow",
+        "type": "rect",
+        "x": 20,
+        "y": 26,
+        "width": 60,
+        "height": 18,
+        "color": "#FF3DDC97",
+        "opacity": 0.85
+      },
+      {
+        "id": "rect_accent",
+        "type": "rect",
+        "x": 20,
+        "y": 46,
+        "width": 32,
+        "height": 8,
+        "color": "#FF4C8BF5",
+        "opacity": 1
+      },
+      {
+        "id": "rect_bar",
+        "type": "rect",
+        "x": 20,
+        "y": 58,
+        "width": 48,
+        "height": 3,
+        "color": "#FF8A94A6",
+        "opacity": 0.6
+      },
+      {
+        "id": "text_clock",
+        "type": "text",
+        "x": 10,
+        "y": 66,
+        "width": 62,
+        "height": 13,
+        "text": "{sys.time.hour:00}:{sys.time.minute:00}",
+        "fontSize": 9,
+        "align": "left",
+        "color": "#FFFFFFFF",
+        "opacity": 1
+      },
+      {
+        "id": "text_battery",
+        "type": "text",
+        "x": 10,
+        "y": 81,
+        "width": 62,
+        "height": 6,
+        "text": "电量 {sys.battery.level:0}%",
+        "fontSize": 4,
+        "align": "left",
+        "color": "#FF8A94A6",
+        "opacity": 1
+      }
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 直接使用平台 Material 主题：不引入 AppCompat，保持零依赖。 -->
+    <style name="Theme.LOOW" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>

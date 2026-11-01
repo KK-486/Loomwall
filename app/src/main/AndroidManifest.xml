@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 渲染后端要求：OpenGL ES 2.0 -->
+    <uses-feature
+        android:glEsVersion="0x00020000"
+        android:required="true" />
+
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- Android 11+ 的包可见性：壁纸点击要启动应用，必须声明要查询什么。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <!--
+            动态壁纸选择器必须在这里声明可见性：
+            Android 11+ 下不声明的话，PackageManager.getActivityInfo() 会直接抛
+            NameNotFoundException，于是"指名组件打开壁纸界面"这条路会被静默跳过——
+            表现就是点了「设为动态壁纸」什么都没发生，日志里只有 standard 那一行。
+        -->
+        <intent>
+            <action android:name="android.service.wallpaper.CHANGE_LIVE_WALLPAPER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SET_WALLPAPER" />
+        </intent>
+        <package android:name="com.android.wallpaper.livepicker" />
+        <package android:name="com.google.android.apps.wallpaper" />
+        <package android:name="com.miui.miwallpaper" />
+    </queries>
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.LOOW">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 阶段 1：画布 + 属性面板；阶段 2b：动画时间轴。
+             编辑器固定横屏：竖屏里画布会被工具栏和面板夹成一条，手机端根本没法调。 -->
+        <activity
+            android:name=".EditorActivity"
+            android:exported="true"
+            android:label="@string/editor_title"
+            android:screenOrientation="landscape"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!--
+            BIND_WALLPAPER 是系统绑定壁纸服务的唯一入口：没有它，
+            壁纸选择器看不到这个服务；有了它，只有系统能绑定。
+        -->
+        <service
+            android:name=".LwpWallpaperService"
+            android:exported="true"
+            android:label="@string/wallpaper_label"
+            android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.wallpaper"
+                android:resource="@xml/wallpaper" />
+        </service>
+        <service
+            android:name=".net.NotificationRelay"
+            android:exported="true"
+            android:label="@string/notify_service_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+    </application>
+
+</manifest>

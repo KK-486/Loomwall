@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LOOW</string>
+    <string name="wallpaper_label">LOOW 动态壁纸</string>
+    <string name="wallpaper_description">开源预设驱动的动态壁纸引擎（阶段 2：可编辑 + 点击动画）</string>
+
+    <string name="main_title">LOOW 壁纸引擎</string>
+    <string name="main_stage">阶段 2 · 点击触发动画</string>
+    <string name="main_version">应用 %1$s · 引擎 %2$s · 场景格式 %3$s</string>
+    <string name="main_apply">设为动态壁纸</string>
+    <string name="main_open_editor">编辑预设</string>
+    <string name="main_hint">若系统未弹出壁纸选择器，请长按桌面空白处 → 壁纸 → 动态壁纸 → LOOW。\n坐标系：x / y / width / height 均为画布宽度的百分比，原点在左上角，y 向下。</string>
+
+    <string name="main_status_ok">预设校验通过</string>
+    <string name="main_status_error">预设加载失败</string>
+    <string name="main_preset_detail">预设：%1$s\n作者：%2$s\n来源：%3$s\n格式版本：%4$s（引擎支持 0.1）\n引擎最低要求：%5$s\n矩形元素：%6$d 个</string>
+    <string name="main_no_wallpaper_component">当前设备没有可用的动态壁纸选择器。</string>
+
+    <string name="editor_title">预设编辑器</string>
+    <string name="editor_add_rect">添加矩形</string>
+    <string name="editor_delete">删除</string>
+    <string name="editor_reset_camera">复位视图</string>
+    <string name="editor_save">保存</string>
+    <string name="editor_apply">应用</string>
+    <string name="editor_reset">恢复内置</string>
+    <string name="editor_properties">属性面板</string>
+    <string name="editor_collapse">收起</string>
+    <string name="editor_expand">展开</string>
+
+    <string name="editor_field_position">位置 X / Y（画布宽度百分比）</string>
+    <string name="editor_field_size">尺寸 宽 / 高（画布宽度百分比）</string>
+    <string name="editor_field_opacity">透明度</string>
+    <string name="editor_field_color">元素颜色（#AARRGGBB）</string>
+    <string name="editor_field_background">背景色（#AARRGGBB）</string>
+
+    <string name="editor_nothing_selected">未选中元素：点一下画布上的矩形</string>
+    <string name="editor_selected">选中：%1$s</string>
+    <string name="editor_added">已添加 %1$s</string>
+    <string name="editor_deleted">已删除选中元素</string>
+    <string name="editor_saved">已保存，回桌面即可看到</string>
+    <string name="editor_save_failed">保存失败：%1$s</string>
+    <string name="editor_load_failed">预设加载失败：%1$s</string>
+    <string name="editor_reset_done">已恢复内置预设</string>
+    <string name="editor_preset_name">我的场景</string>
+
+    <string name="editor_panel_property">属性</string>
+    <string name="editor_panel_animation">动画</string>
+    <string name="editor_animation_section">动画（点击触发）</string>
+    <string name="editor_new_animation">新建动画</string>
+    <string name="editor_delete_animation">删除动画</string>
+    <string name="editor_add_track">添加轨道</string>
+    <string name="editor_animation_created">已创建 %1$s</string>
+    <string name="editor_animation_deleted">已删除动画</string>
+    <string name="editor_track_duplicate">该属性已有轨道</string>
+    <string name="editor_keyframe_time">时间 %1$s</string>
+    <string name="editor_pick_keyframe">点时间轴上的菱形选中关键帧</string>
+    <string name="editor_delete_keyframe">删除帧</string>
+    <string name="editor_preview">预览动画</string>
+    <string name="editor_duration">时长(ms)</string>
+    <string name="editor_rule_hint">规则：%1$s → 目标 %2$s · %3$s</string>
+    <string name="editor_no_animation">还没有动画</string>
+    <string name="editor_pick_element_first">先在画布上选中一个元素</string>
+    <string name="editor_keyframe_too_close">这个位置太接近已有帧</string>
+    <string name="editor_keyframe_minimum">至少要保留两个关键帧</string>
+    <string name="editor_layers">图层</string>
+    <string name="editor_animations">动画</string>
+    <string name="editor_no_layers">还没有元素</string>
+    <string name="editor_insert_keyframe">在当前时间插帧</string>
+    <string name="editor_keyframe_inserted">已在播放头插入关键帧</string>
+    <string name="editor_record_on">记录：开</string>
+    <string name="editor_record_off">记录：关</string>
+    <string name="editor_playhead">播放头 %1$s</string>
+    <string name="main_import">导入预设（JSON）</string>
+    <string name="main_import_hint">从网页端「导出预设（单文件）」拿到的 .json 直接选它即可；导入后回桌面自动生效。</string>
+    <string name="main_receiver_on">网页发送地址：http://%1$s:%2$d （保持本页打开，电脑和手机连同一个 Wi-Fi）</string>
+    <string name="main_receiver_no_ip">没有检测到局域网地址：请先连上 Wi-Fi 再打开本页</string>
+    <string name="main_receiver_failed">接收服务启动失败：端口 8765 可能被占用，重启 App 再试</string>
+    <string name="notify_service_label">LOOW 通知读取</string>
+    <string name="main_grant_notify">开启「通知使用权」后才能显示通知条数与歌曲名</string>
+    <string name="main_grant_steps">开启「身体活动」权限后才能显示今日步数</string>
+    <string name="main_open_notify_settings">打开「通知使用权」设置</string>
+    <string name="main_wallpaper_manual_hint">无法自动打开动态壁纸界面。请手动：设置 → 壁纸 → 动态壁纸 → 选择 LOOW</string>
+    <string name="main_notify_not_bound">通知使用权已开启，但监听服务没被系统绑定（常见于小米/华为的自启动限制）。请到 设置 → 应用管理 → LOOW → 自启动 允许，并把这行的省电策略设为「无限制」。</string>
+    <string name="main_open_autostart">打开「自启动」设置（MIUI 必开）</string>
+    <string name="main_open_power_whitelist">打开「省电策略 / 电池白名单」设置</string>
+    <string name="main_settings_unavailable">这个系统没有可用的设置页，请手动到「设置 → 应用管理 → LOOW」里开启自启动与省电白名单。</string>
+</resources>

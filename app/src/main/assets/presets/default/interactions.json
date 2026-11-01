@@ -1,0 +1,56 @@
+{
+  "formatVersion": "0.6",
+  "events": [
+    {
+      "id": "ev_demo_toggle",
+      "targetId": "rect_glow",
+      "gesture": "tap",
+      "action": { "type": "toggleVisible", "targetId": "rect_bar" }
+    }
+  ],
+  "animations": [
+    {
+      "id": "anim_glow_pulse",
+      "targetId": "rect_glow",
+      "trigger": { "type": "tap" },
+      "tracks": [
+        {
+          "property": "scale",
+          "durationMs": 700,
+          "loop": "once",
+          "keyframes": [
+            { "t": 0.0, "value": 1.0, "easing": "cubicOut" },
+            { "t": 0.45, "value": 1.35, "easing": "cubicInOut" },
+            { "t": 1.0, "value": 1.0, "easing": "linear" }
+          ]
+        },
+        {
+          "property": "rotationZ",
+          "durationMs": 700,
+          "loop": "once",
+          "keyframes": [
+            { "t": 0.0, "value": 0.0, "easing": "cubicOut" },
+            { "t": 0.5, "value": 18.0, "easing": "cubicInOut" },
+            { "t": 1.0, "value": 0.0, "easing": "linear" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "anim_accent_breathe",
+      "targetId": "rect_accent",
+      "trigger": { "type": "always" },
+      "tracks": [
+        {
+          "property": "opacity",
+          "durationMs": 1200,
+          "loop": "pingpong",
+          "keyframes": [
+            { "t": 0.0, "value": 1.0, "easing": "easeInOut" },
+            { "t": 1.0, "value": 0.25, "easing": "easeInOut" }
+          ]
+        }
+      ]
+    }
+  ]
+}
