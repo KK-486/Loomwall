@@ -9,7 +9,14 @@
   ],
   "properties": {
     "formatVersion": {
-      "enum": ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6"]
+      "enum": [
+        "0.1",
+        "0.2",
+        "0.3",
+        "0.4",
+        "0.5",
+        "0.6"
+      ]
     },
     "animations": {
       "type": "array",
@@ -59,6 +66,14 @@
       "additionalProperties": {
         "$ref": "#/$defs/function"
       }
+    },
+    "bindings": {
+      "type": "array",
+      "description": "数据绑定表。表达式绑定（expr）与线性绑定（source + in/out）可以混用。",
+      "items": {
+        "$ref": "#/$defs/binding"
+      },
+      "default": []
     }
   },
   "additionalProperties": true,
@@ -69,10 +84,12 @@
       "pattern": "^(linear|ease|easeIn|easeOut|easeInOut|cubicIn|cubicOut|cubicInOut|cubic-bezier\\(\\s*[0-9.]+\\s*,\\s*[0-9.]+\\s*,\\s*[0-9.]+\\s*,\\s*[0-9.]+\\s*\\))$"
     },
     "property": {
-      "description": "可动画属性。新增属性必须同步解析器与渲染器。",
+      "description": "可动画属性。新增属性必须同步解析器与渲染器。width/height 改变盒子尺寸（文本/贴图按新盒子拉伸，不重排版）。",
       "enum": [
         "x",
         "y",
+        "width",
+        "height",
         "scale",
         "rotationZ",
         "opacity"
@@ -394,6 +411,73 @@
         }
       },
       "additionalProperties": false
+    },
+    "binding": {
+      "type": "object",
+      "description": "数据绑定：把变量（或表达式）映射到元素属性。expr 与 in/out 二选一。",
+      "required": [
+        "targetId",
+        "property"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "targetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "property": {
+          "$ref": "#/$defs/property"
+        },
+        "source": {
+          "type": "string",
+          "description": "线性模式用：数据源变量名，例如 sys.battery.level / sys.audio.b3"
+        },
+        "in": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "number",
+            "minimum": 0
+          },
+          "description": "线性模式的输入区间，例如 [0, 100]"
+        },
+        "out": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "number"
+          },
+          "description": "线性模式的输出区间，例如 [0, 80]"
+        },
+        "expr": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "description": "表达式模式：直接算出目标值，忽略 in/out。可用 audio(1..8)/bass()/mid()/treble()/level()/beat() 以及 sys.* 变量与 + - * / min max abs round floor ceil sqrt sin cos mod if。"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "expr"
+          ]
+        },
+        {
+          "required": [
+            "source",
+            "in",
+            "out"
+          ]
+        }
+      ],
+      "additionalProperties": true
     }
   }
 }
