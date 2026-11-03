@@ -195,14 +195,16 @@ const STUDIO_DEFS = {
    */
   bind: {
     cat: 'action', name: '数据绑定', icon: '🔗', desc: '系统数据 → 图层属性，连续跟随',
-    hint: '不需要触发器：变量一变就重算。只支持 x / y / 缩放 / 旋转 / 透明度（引擎限制）。',
+    hint: '两种用法：① 只填数据源和区间 = 线性映射；② 在「公式」里写表达式（如 20 + 60*audio(3)^2），' +
+      '此时区间被忽略。公式可用 audio(1..8) / bass() / mid() / treble() / level() / beat()。',
     inputs: [],
     outputs: [],
     params: {
-      target: '', prop: 'y', source: 'sys.battery.level',
+      target: '', prop: 'y', expr: '',
+      source: 'sys.battery.level',
       in0: '0', in1: '100', out0: '0', out1: '100'
     },
-    inline: ['target', 'prop', 'source', 'in0', 'in1', 'out0', 'out1']
+    inline: ['target', 'prop', 'source', 'expr', 'in0', 'in1', 'out0', 'out1']
   },
   setVis: {
     cat: 'action', name: '显隐', icon: '👁', desc: '显示或隐藏图层 · 可顺序续接',
@@ -864,10 +866,31 @@ function studioInlineField(node, key) {
       ['sys.battery.temp', '电池温度 °C'],
       ['sys.battery.charging', '是否充电（0/1）'],
       ['sys.notify.count', '未读通知数'],
-      ['sys.mem.used', '内存占用 %'],
-      ['sys.storage.used', '存储占用 %'],
+      ['sys.mem.usedPct', '内存占用 %'],
+      ['sys.storage.usedPct', '存储占用 %'],
       ['sys.time.hour', '小时（0-23）'],
-      ['sys.time.minute', '分钟（0-59）']
+      ['sys.time.minute', '分钟（0-59）'],
+      ['sys.media.progress', '音乐进度 %（0-100）'],
+      ['sys.media.position', '播放位置（秒）'],
+      ['sys.media.duration', '歌曲总长（秒）'],
+      ['sys.media.playing', '是否正在播放（0/1）'],
+      ['sys.audio.level', '音频总音量（0-1）'],
+      ['sys.audio.bass', '低频（0-1）'],
+      ['sys.audio.mid', '中频（0-1）'],
+      ['sys.audio.treble', '高频（0-1）'],
+      ['sys.audio.beat', '节拍脉冲（0-1）'],
+      ['sys.audio.b1', '频谱 1（最低频，0-1）'],
+      ['sys.audio.b2', '频谱 2'],
+      ['sys.audio.b3', '频谱 3'],
+      ['sys.audio.b4', '频谱 4'],
+      ['sys.audio.b5', '频谱 5'],
+      ['sys.audio.b6', '频谱 6'],
+      ['sys.audio.b7', '频谱 7'],
+      ['sys.audio.b8', '频谱 8（最高频）'],
+      ['sys.weather.temp', '气温 °C'],
+      ['sys.weather.humidity', '湿度 %'],
+      ['sys.weather.wind', '风速 km/h'],
+      ['sys.weather.isDay', '是否白天（0/1）']
     ];
     const select = document.createElement('select');
     const keys = SOURCES.map(item => item[0]);

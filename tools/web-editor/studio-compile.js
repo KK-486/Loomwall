@@ -26,7 +26,10 @@
 //   editor.js 会抛 "Identifier already declared" 而**整份不执行**（踩过：state 直接 undefined）。
 'use strict';
 
-const RULE_PROP = { x: 'x', y: 'y', scale: 'scale', rot: 'rotationZ', alpha: 'opacity' };
+const RULE_PROP = {
+  x: 'x', y: 'y', scale: 'scale', rot: 'rotationZ', alpha: 'opacity',
+  width: 'width', height: 'height'
+};
 const MAX_ACTIONS_PER_RULE = 16;
 const MAX_LOOP_UNROLL = 20;     // 桌面端 trace 时最多展开多少轮（引擎侧是真循环，不受这个限制）
 
@@ -131,6 +134,7 @@ function studioUnknownIdentifiers(expr) {
   if (!text.trim()) return [];
 
   const FUNCS = new Set(['if', 'min', 'max', 'mod', 'abs', 'floor', 'ceil', 'round', 'sqrt', 'sin', 'cos']);
+  const AUDIO_FUNC_NAMES = new Set(['audio', 'band', 'bass', 'mid', 'treble', 'level', 'beat']);
   const KEYWORDS = new Set(['and', 'or', 'not', 'true', 'false']);
 
   const known = new Set();
@@ -152,6 +156,8 @@ function studioUnknownIdentifiers(expr) {
     const name = m[0];
     // sys. 开头的是系统变量，由引擎提供
     if (name.startsWith('sys.')) continue;
+    // 音频函数写法（audio(3) / beat() …）：由 expandAudioFuncs 展开，不算未定义
+    if (AUDIO_FUNC_NAMES.has(name)) continue;
     if (FUNCS.has(name) || KEYWORDS.has(name)) continue;
     if (known.has(name)) continue;
     // 形如 a.b 的（非 sys.）：按未定义处理，避免拼错系统变量名
@@ -472,6 +478,40 @@ function compileStudioGraph() {
     if (node.type !== 'bind') return;
     const target = studioLayerOf(node, 'layer');
     if (!target) { ctx.warnings.push('「数据绑定」没有选图层，已跳过'); return; }
+    const property = RULE_PROP[node.params.prop] || 'opacity';
+    // 公式非空 = 表达式模式（不再单独要一个"模式"字段：少一个手输项，也少一类填错）
+    const expr = String(node.params.expr || '').trim();
+
+    if (expr) {
+      if (!expr) {
+        ctx.errors.push('「数据绑定」选了表达式模式但公式是空的（节点 ' + node.id + '）');
+        return;
+      }
+      // 加载期就把错拦下来：引擎遇到坏表达式会跳过这条绑定（不崩，但也不动）
+      const unknown = studioUnknownIdentifiers(expandAudioFuncs(expr));
+      if (unknown.length) {
+        ctx.errors.push('「数据绑定」公式里有不认识的名字：' + unknown.join(', ') + '（节点 ' + node.id + '）');
+        return;
+      }
+      let probe = null;
+      try {
+        probe = evalStudioExpr(expr, {});
+      } catch (e) {
+        ctx.errors.push('「数据绑定」公式语法错误：' + e.message + '（节点 ' + node.id + '）');
+        return;
+      }
+      void probe;
+      bindings.push({
+        id: 'b_' + node.id,
+        targetId: target,
+        property,
+        source: '',
+        expr,
+        enabled: true
+      });
+      return;
+    }
+
     const in0 = studioNum(node.params.in0, 0);
     const in1 = studioNum(node.params.in1, 100);
     if (in0 === in1) {
@@ -481,7 +521,7 @@ function compileStudioGraph() {
     bindings.push({
       id: 'b_' + node.id,
       targetId: target,
-      property: RULE_PROP[node.params.prop] || 'opacity',
+      property,
       source: String(node.params.source || 'sys.battery.level'),
       in: [in0, in1],
       out: [studioNum(node.params.out0, 0), studioNum(node.params.out1, 100)],
@@ -509,10 +549,23 @@ function compileStudioGraph() {
 // ---------------------------------------------------------------- 迷你表达式求值
 // 只支持引擎那套子集：数字、标识符、+ - * / %、比较、and / or / not、括号、if(a,b,c)。
 // 自己写而不是用 eval，是为了和引擎行为一致（引擎也是白名单解析）。
-function evalStudioExpr(source, scope) {
+/**
+ * 把 `audio(3)` / `beat()` 这类函数写法展开成变量名，与引擎的 BindingExpr 一致。
+ * 展开后求值器只需要认识普通标识符。
+ */
+function expandAudioFuncs(source) {
+  let text = String(source || '');
+  text = text.replace(/\baudio\s*\(\s*([1-8])\s*\)/gi, (_, n) => 'sys.audio.b' + n);
+  for (const fn of ['bass', 'mid', 'treble', 'level', 'beat']) {
+    text = text.replace(new RegExp('\\b' + fn + '\\s*\\(\\s*\\)', 'gi'), 'sys.audio.' + fn);
+  }
+  return text;
+}
+
+function evalStudioExpr(rawSource, scope) {
   const tokens = [];
   let i = 0;
-  const s = String(source || '');
+  const s = expandAudioFuncs(rawSource);
   const isDigit = c => c >= '0' && c <= '9';
   const isIdentStart = c => /[A-Za-z_]/.test(c);
   const isIdent = c => /[A-Za-z0-9_.]/.test(c);
@@ -540,7 +593,7 @@ function evalStudioExpr(source, scope) {
       i += 2;
       continue;
     }
-    if ('+-*/%<>()!,'.includes(c)) {
+    if ('+-*/%^<>()!,'.includes(c)) {
       tokens.push({ t: 'op', v: c });
       i += 1;
       continue;
@@ -602,7 +655,16 @@ function evalStudioExpr(source, scope) {
     if (peek() && peek().t === 'op' && peek().v === '-') { pos += 1; return -toNum(parseUnary()); }
     if (peek() && peek().t === 'op' && peek().v === '!') { pos += 1; return !toBool(parseUnary()); }
     if (peek() && peek().t === 'id' && peek().v === 'not') { pos += 1; return !toBool(parseUnary()); }
-    return parsePrimary();
+    return parsePow();
+  }
+  // 幂：右结合，优先级高于乘除（与引擎一致）
+  function parsePow() {
+    const base = parsePrimary();
+    if (peek() && peek().t === 'op' && peek().v === '^') {
+      pos += 1;
+      return Math.pow(toNum(base), toNum(parsePow()));
+    }
+    return base;
   }
   function parsePrimary() {
     const t = peek();

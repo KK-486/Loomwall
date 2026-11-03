@@ -60,13 +60,16 @@ const DEFAULT_MANIFEST = {
 /** 界面上的「属性」= 一个通道；位置包含 x、y 两条底层轨道。 */
 const CHANNELS = [
   { key: 'position', label: '位置', props: ['x', 'y'] },
+  { key: 'size', label: '宽高', props: ['width', 'height'] },
   { key: 'scale', label: '缩放', props: ['scale'] },
   { key: 'rotation', label: '旋转', props: ['rotationZ'] },
   { key: 'opacity', label: '透明度', props: ['opacity'] }
 ];
 const ALL_PROPS = CHANNELS.flatMap(c => c.props);
 const PROPERTY_RANGES = {
-  x: [-200, 400], y: [-200, 600], scale: [0.05, 10], rotationZ: [-720, 720], opacity: [0, 1]
+  x: [-200, 400], y: [-200, 600], scale: [0.05, 10], rotationZ: [-720, 720], opacity: [0, 1],
+  // 宽高是盒子尺寸（画布单位），允许比屏幕更宽/更高，所以上限给到 300
+  width: [0, 300], height: [0, 300]
 };
 
 const EASING_NAMES = ['linear', 'ease', 'easeIn', 'easeOut', 'easeInOut', 'cubicIn', 'cubicOut', 'cubicInOut'];
@@ -1070,8 +1073,9 @@ function fillVectorPath(node) {
     vw = parts[2];
     vh = parts[3];
   }
-  const wPx = worldToPx(node.width);
-  const hPx = worldToPx(node.height);
+  // 宽高关键帧：预览里也得跟着变，否则编辑器"看不到"自己调的效果
+  const wPx = worldToPx((overridesCached()[node.id] || {}).width !== undefined ? (overridesCached()[node.id] || {}).width : node.width);
+  const hPx = worldToPx((overridesCached()[node.id] || {}).height !== undefined ? (overridesCached()[node.id] || {}).height : node.height);
   const path = new Path2D(node.path);
   ctx.save();
   ctx.scale(wPx / vw, hPx / vh);
@@ -1256,6 +1260,8 @@ function staticValue(rect, prop) {
   if (prop === 'scale') return rect.scale === undefined ? 1 : rect.scale;
   if (prop === 'rotationZ') return rect.rotationZ || 0;
   if (prop === 'opacity') return rect.opacity === undefined ? 1 : rect.opacity;
+  // 宽高的"静态值"就是节点自身尺寸，不能像 x/y 那样按 0 兜底
+  if (prop === 'width' || prop === 'height') return rect[prop] === undefined ? 0 : rect[prop];
   return rect[prop] || 0;
 }
 
@@ -1517,9 +1523,17 @@ function simValueOf(source) {
     case 'sys.time.minute': return Number(sim.minute ?? 0);
     case 'sys.battery.temp': return Number(sim.temp ?? 32);
     case 'sys.notify.count': return Number(sim.notify ?? 3);
+    // 引擎里的真名是 usedPct；旧名字保留，避免老预设预览突然变 0
+    case 'sys.mem.usedPct':
     case 'sys.mem.used': return Number(sim.mem ?? 60);
+    case 'sys.storage.usedPct':
     case 'sys.storage.used': return Number(sim.storage ?? 50);
-    default: return 0;
+    default: {
+      // 其余系统变量（音乐进度、音频频谱等）用统一的预览值表兜底。
+      // 之前这里直接 return 0：绑定音频后画布上柱子永远是平的，看起来像"绑定没生效"。
+      const v = previewVar(source);
+      return v === undefined ? 0 : Number(v);
+    }
   }
 }
 
@@ -1530,9 +1544,42 @@ function bindingOverrides() {
   // 开着时绑定的轴由数据算出，拖动会被覆盖回去（预期行为）
   const toggle = document.getElementById('bind-preview');
   if (toggle && !toggle.checked) return out;
-  const list = (state.doc.interactions.bindings || []);
+  // 绑定的唯一真相是「触发器工作台」里的节点；旧字段只在没有节点时兜底。
+  // 之前这里只读 doc.bindings，而导入时绑定已被迁移成节点 —— 于是画布上柱子全平，
+  // 但导出到手机又是对的（用户实测：编辑器看不到效果、真机正常）。
+  let list = (state.doc.interactions.bindings || []);
+  if (typeof compileStudioGraph === 'function') {
+    const nodes = (state.doc.interactions.studio && state.doc.interactions.studio.nodes) || [];
+    if (nodes.some(n => n && n.type === 'bind')) {
+      const compiled = compileStudioGraph();
+      list = (compiled.model.bindings || []);
+    }
+  }
   for (const b of list) {
     if (!b || b.enabled === false) continue;
+
+    // 表达式绑定：直接算公式（scope 用预览值表，和线性绑定共用同一套模拟数据）
+    if (b.expr) {
+      let value = null;
+      try {
+        if (typeof evalStudioExpr === 'function') {
+          const scope = {};
+          for (const name of Object.keys(PREVIEW_VARS)) {
+            const v = previewVar(name);
+            if (typeof v === 'number') scope[name] = v;
+          }
+          scope['sys.mem.usedPct'] = Number((state.sim || {}).mem ?? 60);
+          scope['sys.storage.usedPct'] = Number((state.sim || {}).storage ?? 50);
+          value = Number(evalStudioExpr(b.expr, scope));
+        }
+      } catch {
+        value = null;
+      }
+      if (value === null || !Number.isFinite(value)) continue;
+      (out[b.targetId] = out[b.targetId] || {})[b.property] = value;
+      continue;
+    }
+
     const inA = Array.isArray(b.in) ? b.in : [Number(b.inMin ?? 0), Number(b.inMax ?? 100)];
     const outA = Array.isArray(b.out) ? b.out : [Number(b.outMin ?? 0), Number(b.outMax ?? 100)];
     const raw = simValueOf(b.source);
@@ -1565,6 +1612,19 @@ function currentOverrides() {
   return merged;
 }
 
+/**
+ * 每帧/每次命中测试只算一遍覆盖值。
+ *
+ * 为什么要缓存：currentOverrides() 内部会 compileStudioGraph()，节点有几十个时，
+ * 每帧每节点各调一次等于每帧编译几十遍工作台——既卡，又会让同帧内不同元素读到不同的值。
+ */
+let overridesCache = null;
+function overridesCached() {
+  if (!overridesCache) overridesCache = currentOverrides();
+  return overridesCache;
+}
+function invalidateOverrides() { overridesCache = null; }
+
 function overridesFor(rect, all) {
   return (all && all[rect.id]) || {};
 }
@@ -1576,7 +1636,10 @@ function rectTransform(rect, overrides) {
   const x = o.x !== undefined ? o.x : rect.x;
   const y = o.y !== undefined ? o.y : rect.y;
   const opacity = o.opacity !== undefined ? o.opacity : (rect.opacity === undefined ? 1 : rect.opacity);
-  return { x, y, w: rect.width * scale, h: rect.height * scale, rotation, opacity };
+  // 宽高覆盖：盒子和缩放相乘，与引擎端 nodeMatrix 的口径一致
+  const w = (o.width !== undefined ? o.width : rect.width) * scale;
+  const h = (o.height !== undefined ? o.height : rect.height) * scale;
+  return { x, y, w, h, rotation, opacity };
 }
 
 function cornersOf(t) {
@@ -1613,6 +1676,7 @@ function mapPoint(matrix, x, y) {
 }
 
 function draw() {
+  invalidateOverrides();
   const W = canvas.width, H = canvas.height;
   const bg = parseColor(state.doc.scene.root.background);
 
@@ -1699,7 +1763,7 @@ function draw() {
         }
       }
     } else {
-      const pts = cornersOf(rectTransform(rect, overridesFor(rect, currentOverrides())));
+      const pts = cornersOf(rectTransform(rect, overridesFor(rect, overridesCached())));
       ctx.save();
       ctx.strokeStyle = '#ffdb4d';
       ctx.lineWidth = Math.max(1.6 * canvasPixelRatio(), W / 600);
@@ -1722,8 +1786,9 @@ function draw() {
 function nodeCornersPx(node) {
   const m = node ? nodeMatrices.get(node.id) : null;
   if (!m) return null;
-  const wPx = worldToPx(node.width);
-  const hPx = worldToPx(node.height);
+  const ovN = overridesCached()[node.id] || {};
+  const wPx = worldToPx(ovN.width !== undefined ? ovN.width : node.width);
+  const hPx = worldToPx(ovN.height !== undefined ? ovN.height : node.height);
   return [[0, 0], [wPx, 0], [wPx, hPx], [0, hPx]].map(([x, y]) => {
     const p = mapPoint(m, x, y);
     return { x: p.x, y: p.y };
@@ -1826,17 +1891,20 @@ canvas.addEventListener('pointerleave', () => {
 });
 
 function drawNode(node) {
-  if (!node.visible) return;
+  // 与引擎一致：只有显式 false 才算隐藏。手写/纯 JSON 预设常常不写 visible，
+  // 这里若按 truthy 判断会把整份预设画成空白（用户实测：手机正常、编辑器全黑）
+  if (node.visible === false) return;
 
-  const ov = overridesFor(node, currentOverrides());
+  const ov = overridesFor(node, overridesCached());
   const x = ov.x !== undefined ? ov.x : node.x;
   const y = ov.y !== undefined ? ov.y : node.y;
   const scale = ov.scale !== undefined ? ov.scale : (node.scale === undefined ? 1 : node.scale);
   const rotation = ov.rotationZ !== undefined ? ov.rotationZ : (node.rotationZ || 0);
   const opacity = ov.opacity !== undefined ? ov.opacity : (node.opacity === undefined ? 1 : node.opacity);
 
-  const wPx = worldToPx(node.width);
-  const hPx = worldToPx(node.height);
+  const ovN = overridesCached()[node.id] || {};
+  const wPx = worldToPx(ovN.width !== undefined ? ovN.width : node.width);
+  const hPx = worldToPx(ovN.height !== undefined ? ovN.height : node.height);
 
   ctx.save();
   // 羽化半径（像素）：按"占元素宽度的比例"换算，与引擎端同一套语义。
@@ -2019,7 +2087,16 @@ function drawNode(node) {
 // 未识别的占位符**原样保留**：这样写错变量名时画布上能立刻看出来，
 // 而不是被悄悄替换成空字符串（那是更难查的错）。
 const PREVIEW_TEXT_VARS = {
-  'sys.media.title': '正在播放的歌名'
+  'sys.media.title': '夜に駆ける',
+  'sys.media.artist': 'YOASOBI',
+  'sys.media.album': 'THE BOOK',
+  'sys.media.app': '网易云音乐',
+  'sys.media.lyric': '沈むように溶けてゆくように',
+  'sys.media.lyricNext': '二人だけの空が広がる夜に',
+  'sys.media.lyricTrans': '每当夜幕降临，只有我们两人的天空',
+  'sys.weather.text': '多云',
+  'sys.weather.city': '清远市',
+  'sys.weather.district': '清城区'
 };
 
 const PREVIEW_VARS = {
@@ -2037,6 +2114,26 @@ const PREVIEW_VARS = {
   'sys.storage.freeMb': 11800,
   'sys.render.fps': 60,
   'sys.notify.count': 3,
+  'sys.media.playing': 1,
+  'sys.media.position': 48,
+  'sys.media.duration': 259,
+  'sys.media.progress': 18.5,
+  // 音频可视化样例值：刻意做成"低频高、高频低"的走势，和真实频谱接近
+  'sys.audio.level': 0.62,
+  'sys.audio.bass': 0.78,
+  'sys.audio.mid': 0.45,
+  'sys.audio.treble': 0.22,
+  'sys.audio.beat': 0.35,
+  'sys.weather.temp': 24,
+  'sys.weather.feelsLike': 25.5,
+  'sys.weather.humidity': 62,
+  'sys.weather.code': 2,
+  'sys.weather.wind': 6,
+  'sys.weather.precip': 0,
+  'sys.weather.isDay': 1,
+  'sys.weather.updated': 3,
+  'sys.audio.b1': 0.82, 'sys.audio.b2': 0.74, 'sys.audio.b3': 0.58, 'sys.audio.b4': 0.46,
+  'sys.audio.b5': 0.34, 'sys.audio.b6': 0.26, 'sys.audio.b7': 0.18, 'sys.audio.b8': 0.12,
   'step.today': 1234
 };
 
@@ -2245,8 +2342,9 @@ function maskCenterOnCanvas(node) {
   const m = nodeMatrices.get(node.id);
   if (!m) return null;
 
-  const wPx = worldToPx(node.width);
-  const hPx = worldToPx(node.height);
+  const ovN = overridesCached()[node.id] || {};
+  const wPx = worldToPx(ovN.width !== undefined ? ovN.width : node.width);
+  const hPx = worldToPx(ovN.height !== undefined ? ovN.height : node.height);
   const mw = ((Number(node.maskW) || 100) / 100) * wPx;
   const mh = ((Number(node.maskH) || 100) / 100) * hPx;
   const left = (wPx - mw) / 2 + ((Number(node.maskX) || 0) / 100) * wPx;
@@ -2259,12 +2357,14 @@ function insideNode(node, px, py) {
   const m = nodeMatrices.get(node.id);
   if (!m) return false;
   const p = mapPoint(m.inverse(), px, py);
-  const wPx = worldToPx(node.width);
-  const hPx = worldToPx(node.height);
+  const ovN = overridesCached()[node.id] || {};
+  const wPx = worldToPx(ovN.width !== undefined ? ovN.width : node.width);
+  const hPx = worldToPx(ovN.height !== undefined ? ovN.height : node.height);
   return p.x >= 0 && p.y >= 0 && p.x <= wPx && p.y <= hPx;
 }
 
 function hitRect(px, py) {
+  invalidateOverrides();
   let hit = null;
 
   // 后画的在上层：同层倒序；容器先问子节点，再问自己
@@ -2274,7 +2374,7 @@ function hitRect(px, py) {
       // 叶子穿透节点：让位给下层，不设 hit
       return false;
     }
-    if (!node.visible) return false;
+    if (node.visible === false) return false;
     if (isContainer(node)) {
       const children = node.children || [];
       for (let i = children.length - 1; i >= 0; i--) {
@@ -2322,7 +2422,7 @@ function parentScaleOf(node) {
 function hitHandle(px, py) {
   const rect = selectedRect();
   if (!rect) return -1;
-  const pts = nodeCornersPx(rect) || cornersOf(rectTransform(rect, overridesFor(rect, currentOverrides())));
+  const pts = nodeCornersPx(rect) || cornersOf(rectTransform(rect, overridesFor(rect, overridesCached())));
   // 命中半径按屏幕 16px 算：手柄视觉上是 10px，再留 6px 容错，
   // 手指/触控板都不至于必须精准点在方块正中。
   // 不要写成 Math.max(…, canvas.width/90)：2.6 倍超采样下那只剩 10 屏幕像素。
@@ -2366,7 +2466,10 @@ function ensureClipNames() {
 // 早期绑定只在右侧面板里配置，数据是 interactions.bindings。
 // 现在统一改由工作台的「数据绑定」节点管理，所以导入旧文件时要把每条绑定转成一个节点，
 // 否则：① 面板已隐藏，用户看不到那几条绑定 ② 一旦新增节点，导出会用节点覆盖 bindings，直接丢数据。
-const ENGINE_PROP_TO_UI = { x: 'x', y: 'y', scale: 'scale', rotationZ: 'rot', opacity: 'alpha' };
+const ENGINE_PROP_TO_UI = {
+  x: 'x', y: 'y', scale: 'scale', rotationZ: 'rot', opacity: 'alpha',
+  width: 'width', height: 'height'
+};
 
 function migrateLegacyBindings(doc) {
   if (!doc || !doc.interactions) return 0;
@@ -2384,10 +2487,14 @@ function migrateLegacyBindings(doc) {
     if (!target) return;
     const prop = ENGINE_PROP_TO_UI[b.property] || 'y';
     const source = String(b.source || 'sys.battery.level');
+    // 表达式绑定（0.8）：迁移时必须把公式带过来，否则节点变成线性模式，
+    // 预览会按 in/out 硬算（实测：温度条直接顶到 100），导出也会丢掉公式。
+    const expr = String(b.expr || '').trim();
     // 已经存在等价节点就不重复建
     const exists = it.studio.nodes.some(n =>
       n.type === 'bind' && n.params &&
-      n.params.target === target && n.params.prop === prop && n.params.source === source
+      n.params.target === target && n.params.prop === prop &&
+      (expr ? String(n.params.expr || '').trim() === expr : n.params.source === source)
     );
     if (exists) return;
     const inA = Array.isArray(b.in) ? b.in : [0, 100];
@@ -2397,13 +2504,15 @@ function migrateLegacyBindings(doc) {
       type: 'bind',
       x: 60 + (index % 2) * 300,
       y: 60 + Math.floor(index / 2) * 190,
-      params: {
-        target,
-        prop,
-        source,
-        in0: String(inA[0]), in1: String(inA[1]),
-        out0: String(outA[0]), out1: String(outA[1])
-      }
+      params: expr
+        ? { target, prop, expr }
+        : {
+            target,
+            prop,
+            source,
+            in0: String(inA[0]), in1: String(inA[1]),
+            out0: String(outA[0]), out1: String(outA[1])
+          }
     });
     created += 1;
   });
@@ -2834,7 +2943,7 @@ function resizeRect(rect, handle, p) {
   // 关键：锚点必须用**画面上看到的**几何来算。
   // 之前这里传的是 {}（静态值），而缩放却读动画后的值，
   // 一旦缩放或位置打了关键帧，两套坐标系就对不上，拖动会围绕中心反复缩放。
-  const drawn = overridesFor(rect, currentOverrides());
+  const drawn = overridesFor(rect, overridesCached());
   const t = rectTransform(rect, drawn);
   const pts = cornersOf(t).map(v => ({ x: v.ux, y: v.uy }));
   const anchor = pts[[2, 3, 0, 1][handle]];
@@ -3911,6 +4020,11 @@ function renderInspector() {
         numberControl(current.x, v => changeValue(rect, channel, 'x', v, true), () => renderTimeline(), 1),
         numberControl(current.y, v => changeValue(rect, channel, 'y', v, true), () => renderTimeline(), 1)
       );
+    } else if (channel.key === 'size') {
+      nodes.push(
+        numberControl(current.width, v => changeValue(rect, channel, 'width', v, true), () => renderTimeline(), 1),
+        numberControl(current.height, v => changeValue(rect, channel, 'height', v, true), () => renderTimeline(), 1)
+      );
     } else if (channel.key === 'scale') {
       // 滑条与数字共用：显示 0–500%，写盘是 0–5 的倍数
       nodes.push(sliderWithInput({
@@ -4291,11 +4405,15 @@ function sliderWithInput(opts) {
 }
 
 const CHANNEL_DEFAULTS = { position: { x: 0, y: 0 }, scale: { scale: 1 }, rotation: { rotationZ: 0 }, opacity: { opacity: 1 } };
-const RESET_LABELS = { position: '0, 0', scale: '100%', rotation: '0°', opacity: '100%' };
+// 宽高的"默认"是节点自身尺寸，在 resetChannel 里单独处理，这里只给标签
+const RESET_LABELS = { position: '0, 0', scale: '100%', rotation: '0°', opacity: '100%', size: '原尺寸' };
 
 /** 重置为默认值；已进入关键帧模式时写在当前播放头，否则改静态值。 */
 function resetChannel(rect, channel) {
-  const defaults = CHANNEL_DEFAULTS[channel.key];
+  // 宽高重置回"元素原本的尺寸"，比固定数字有意义
+  const defaults = channel.key === 'size'
+    ? { width: rect.width, height: rect.height }
+    : CHANNEL_DEFAULTS[channel.key];
   for (const prop of channel.props) {
     changeValue(rect, channel, prop, defaults[prop], true);
   }
@@ -4916,7 +5034,14 @@ function pruneForExport() {
   const clipsAll = doc.interactions.animations || [];
   const usesHold = clipsAll.some(c => (c.tracks || []).some(t => t && t.loop === 'onceHold'));
   const usesFuncTrigger = clipsAll.some(c => c && c.trigger && c.trigger.type === 'func');
-  if (usesHold || usesFuncTrigger) {
+  // 0.7 才支持宽高动画：只有真的用了宽高轨道才标 0.7。
+  // 其余情况（含 onceHold / 函数触发）仍标 0.6 —— 老版本 App 能继续读，
+  // 不要因为编辑器升级就把所有预设的兼容性一起抬高。
+  const usesSizeTrack = clipsAll.some(c =>
+    (c.tracks || []).some(t => t && (t.property === 'width' || t.property === 'height')));
+  if (usesSizeTrack) {
+    doc.interactions.formatVersion = '0.7';
+  } else if (usesHold || usesFuncTrigger) {
     doc.interactions.formatVersion = '0.6';
   } else if (hasTriggers) {
     doc.interactions.formatVersion = usesLoops ? '0.5' : '0.4';
@@ -5199,6 +5324,39 @@ function export3() {
   setTimeout(() => download('interactions.json', JSON.stringify(doc.interactions, null, 2)), 240);
 }
 
+/**
+ * 补齐"引擎有缺省值、编辑器各条路径却依赖"的字段。
+ *
+ * 为什么需要：手写或第三方导出的预设经常只写必要字段（没有 visible/scale/align 等）。
+ * 引擎按缺省值渲染没问题，但编辑器里"图层列表、绘制、命中、属性面板"各自读字段，
+ * 少一个就会表现成空白画布 / 点不中（用户实测：手机上正常，导入编辑器全黑）。
+ */
+function normalizeScene(scene) {
+  if (!scene || !scene.root) return;
+  const blow = (n) => {
+    if (!n) return;
+    if (n.visible === undefined) n.visible = true;
+    if (n.scale === undefined) n.scale = 1;
+    if (n.rotationZ === undefined) n.rotationZ = 0;
+    if (n.opacity === undefined) n.opacity = 1;
+    if (n.type === 'text') {
+      if (n.align === undefined) n.align = 'left';
+      if (n.fontSize === undefined) n.fontSize = 6;
+    } else if (n.type === 'rect') {
+      if (n.shape === undefined) n.shape = 'rect';
+      if (n.cornerRadius === undefined) n.cornerRadius = 0;
+      if (n.feather === undefined) n.feather = 0;
+    } else if (n.type === 'image') {
+      if (n.cornerRadius === undefined) n.cornerRadius = 0;
+      if (n.feather === undefined) n.feather = 0;
+    } else if (n.type === 'container') {
+      if (n.clip === undefined) n.clip = !n.id || n.id !== 'root';
+    }
+    (n.children || []).forEach(blow);
+  };
+  blow(scene.root);
+}
+
 function importJson(text) {
   let data;
   try { data = JSON.parse(text); } catch { status('不是合法 JSON'); return; }
@@ -5212,6 +5370,8 @@ function importJson(text) {
   else if (data && data.animations) state.doc.interactions = data;
   else if (data && data.engineMinVersion) state.doc.manifest = data;
   else { status('无法识别：需要预设包 / scene / interactions / manifest'); return; }
+
+  normalizeScene(state.doc.scene);
 
   // 旧文件的 interactions.bindings 要转成「数据绑定」节点，否则面板已隐藏、用户再也看不到
   const migrated = migrateLegacyBindings(state.doc);
@@ -5786,17 +5946,46 @@ function highlightSelectedLayer(selectedId) {
 
 const BIND_PROPS = [
   ['x', 'x（横向位置）'], ['y', 'y（纵向位置）'],
-  ['scale', '缩放'], ['rotationZ', '旋转'], ['opacity', '透明度']
+  ['scale', '缩放'], ['rotationZ', '旋转'], ['opacity', '透明度'],
+  ['width', '宽度'], ['height', '高度']
 ];
 // 数据源：值是引擎变量名，标签是中文说明
 const BIND_VARS = [
   ['sys.battery.level', '电量 %（0-100）'],
   ['sys.battery.temp', '电池温度 °C（约 20-45）'],
+  ['sys.battery.charging', '是否充电（0/1）'],
   ['sys.notify.count', '未读通知数（0 起）'],
-  ['sys.mem.used', '内存占用 %（0-100）'],
-  ['sys.storage.used', '存储占用 %（0-100）'],
+  // 引擎里这两个变量的真名是 usedPct；旧版编辑器写的是 sys.mem.used / sys.storage.used，
+  // 绑定会静默失效，这里一并修正
+  ['sys.mem.usedPct', '内存占用 %（0-100）'],
+  ['sys.storage.usedPct', '存储占用 %（0-100）'],
   ['sys.time.hour', '小时（0-23）'],
-  ['sys.time.minute', '分钟（0-59）']
+  ['sys.time.minute', '分钟（0-59）'],
+  ['sys.media.progress', '音乐进度 %（0-100）'],
+  ['sys.media.position', '播放位置（秒）'],
+  ['sys.media.duration', '歌曲总长（秒）'],
+  ['sys.media.playing', '是否正在播放（0/1）'],
+  ['sys.audio.level', '音频总音量（0-1）'],
+  ['sys.audio.bass', '低频能量（0-1，鼓点最敏感）'],
+  ['sys.audio.mid', '中频能量（0-1，人声）'],
+  ['sys.audio.treble', '高频能量（0-1）'],
+  ['sys.audio.beat', '节拍脉冲（0-1，每拍置 1 后衰减）'],
+  ['sys.audio.b1', '频谱 1（最低频）'],
+  ['sys.audio.b2', '频谱 2'],
+  ['sys.audio.b3', '频谱 3'],
+  ['sys.audio.b4', '频谱 4'],
+  ['sys.audio.b5', '频谱 5'],
+  ['sys.audio.b6', '频谱 6'],
+  ['sys.audio.b7', '频谱 7'],
+  ['sys.audio.b8', '频谱 8（最高频）'],
+  ['sys.weather.temp', '气温 °C（约 -20..40）'],
+  ['sys.weather.feelsLike', '体感温度 °C'],
+  ['sys.weather.humidity', '湿度 %（0-100）'],
+  ['sys.weather.wind', '风速 km/h'],
+  ['sys.weather.precip', '降水量 mm'],
+  ['sys.weather.isDay', '是否白天（0/1）'],
+  ['sys.weather.code', '天气代码（WMO）'],
+  ['sys.weather.updated', '距上次更新分钟数']
 ];
 
 function bindings() {
@@ -6244,7 +6433,7 @@ window.addEventListener('resize', () => {
 });
 
 // 版本标记：刷新后看一眼这里，就能确认浏览器是不是真的拿到了新脚本。
-const BUILD_TAG = '2026-11-01-bind4';
+const BUILD_TAG = '2026-11-03-v101weather2';
 (function () {
   const node = document.getElementById('build');
   if (node) node.textContent = 'build ' + BUILD_TAG;

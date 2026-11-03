@@ -121,4 +121,124 @@ const CATALOG = [
     placeholder: '{si(width)}', desc: '屏幕尺寸（画布单位）',
     implemented: false,
   },
+
+  // ---- 音乐（通知使用权 + 在线匹配）----
+  {
+    key: 'sys.media.artist', kind: 'var', category: '音乐', signature: 'sys.media.artist',
+    placeholder: '{sys.media.artist}', desc: '歌手', implemented: true,
+  },
+  {
+    key: 'sys.media.album', kind: 'var', category: '音乐', signature: 'sys.media.album',
+    placeholder: '{sys.media.album}', desc: '专辑', implemented: true,
+  },
+  {
+    key: 'sys.media.app', kind: 'var', category: '音乐', signature: 'sys.media.app',
+    placeholder: '{sys.media.app}', desc: '当前播放器（网易云音乐 / QQ音乐…，自动识别）', implemented: true,
+  },
+  {
+    key: 'sys.media.lyric', kind: 'var', category: '音乐', signature: 'sys.media.lyric',
+    placeholder: '{sys.media.lyric}',
+    desc: '当前歌词行（按歌名自动匹配，空字符串表示这句没有歌词）', implemented: true,
+  },
+  {
+    key: 'sys.media.lyricTrans', kind: 'var', category: '音乐', signature: 'sys.media.lyricTrans',
+    placeholder: '{sys.media.lyricTrans}',
+    desc: '当前歌词的译文（不是每首歌都有）', implemented: true,
+  },
+  {
+    key: 'sys.media.lyricNext', kind: 'var', category: '音乐', signature: 'sys.media.lyricNext',
+    placeholder: '{sys.media.lyricNext}', desc: '下一句歌词', implemented: true,
+  },
+  {
+    key: 'sys.media.progress', kind: 'var', category: '音乐', signature: 'sys.media.progress',
+    placeholder: '{sys.media.progress:0}', desc: '播放进度百分比（0-100）', implemented: true,
+  },
+  {
+    key: 'sys.media.position', kind: 'var', category: '音乐', signature: 'sys.media.position',
+    placeholder: '{sys.media.position:0}', desc: '播放位置（秒）', implemented: true,
+  },
+  {
+    key: 'sys.media.duration', kind: 'var', category: '音乐', signature: 'sys.media.duration',
+    placeholder: '{sys.media.duration:0}', desc: '歌曲总长（秒）', implemented: true,
+  },
+  {
+    key: 'sys.media.playing', kind: 'var', category: '音乐', signature: 'sys.media.playing',
+    placeholder: '{sys.media.playing:0}', desc: '是否正在播放（0/1）', implemented: true,
+  },
+
+  // ---- 天气（需定位权限，或在 App 里手动设置城市）----
+  {
+    key: 'sys.weather.temp', kind: 'var', category: '天气', signature: 'sys.weather.temp',
+    placeholder: '{sys.weather.temp:0}', desc: '气温 °C（每 30 分钟更新）', implemented: true,
+  },
+  {
+    key: 'sys.weather.feelsLike', kind: 'var', category: '天气', signature: 'sys.weather.feelsLike',
+    placeholder: '{sys.weather.feelsLike:0}', desc: '体感温度 °C', implemented: true,
+  },
+  {
+    key: 'sys.weather.humidity', kind: 'var', category: '天气', signature: 'sys.weather.humidity',
+    placeholder: '{sys.weather.humidity:0}', desc: '相对湿度 %', implemented: true,
+  },
+  {
+    key: 'sys.weather.text', kind: 'var', category: '天气', signature: 'sys.weather.text',
+    placeholder: '{sys.weather.text}', desc: '中文天气描述（晴 / 多云 / 中雨…）', implemented: true,
+  },
+  {
+    key: 'sys.weather.city', kind: 'var', category: '天气', signature: 'sys.weather.city',
+    placeholder: '{sys.weather.city}', desc: '城市名（定位反查或手动设置）', implemented: true,
+  },
+  {
+    key: 'sys.weather.district', kind: 'var', category: '天气', signature: 'sys.weather.district',
+    placeholder: '{sys.weather.district}', desc: '区 / 县名（由定位反查，例如「清城区」）', implemented: true,
+  },
+  {
+    key: 'sys.weather.wind', kind: 'var', category: '天气', signature: 'sys.weather.wind',
+    placeholder: '{sys.weather.wind:0}', desc: '风速 km/h', implemented: true,
+  },
+  {
+    key: 'sys.weather.precip', kind: 'var', category: '天气', signature: 'sys.weather.precip',
+    placeholder: '{sys.weather.precip:0.0}', desc: '降水量 mm', implemented: true,
+  },
+  {
+    key: 'sys.weather.isDay', kind: 'var', category: '天气', signature: 'sys.weather.isDay',
+    placeholder: '{sys.weather.isDay:0}', desc: '是否白天（1/0），可用来切换昼夜配色', implemented: true,
+  },
+  {
+    key: 'sys.weather.code', kind: 'var', category: '天气', signature: 'sys.weather.code',
+    placeholder: '{sys.weather.code:0}',
+    desc: 'WMO 代码（0 晴 / 2 多云 / 61 小雨 / 95 雷雨），适合用 if() 分派图标', implemented: true,
+  },
+  {
+    key: 'sys.weather.updated', kind: 'var', category: '天气', signature: 'sys.weather.updated',
+    placeholder: '{sys.weather.updated:0}', desc: '距上次更新的分钟数（999 = 从未拿到）', implemented: true,
+  },
+
+  // ---- 音频可视化（需要录音权限）----
+  {
+    key: 'audio', kind: 'fn', category: '音频', signature: 'audio(n)',
+    placeholder: '{audio(3):0.00}',
+    desc: '第 n 段频谱能量 0..1（n = 1..8，1 是最低频）。换不同的 n、绑不同属性就是不同形态',
+    implemented: true,
+  },
+  {
+    key: 'bass', kind: 'fn', category: '音频', signature: 'bass()',
+    placeholder: '{bass():0.00}', desc: '低频能量 0..1（鼓点最敏感）', implemented: true,
+  },
+  {
+    key: 'mid', kind: 'fn', category: '音频', signature: 'mid()',
+    placeholder: '{mid():0.00}', desc: '中频能量 0..1（人声主要落在这一段）', implemented: true,
+  },
+  {
+    key: 'treble', kind: 'fn', category: '音频', signature: 'treble()',
+    placeholder: '{treble():0.00}', desc: '高频能量 0..1', implemented: true,
+  },
+  {
+    key: 'level', kind: 'fn', category: '音频', signature: 'level()',
+    placeholder: '{level():0.00}', desc: '总音量 0..1（含所有频段）', implemented: true,
+  },
+  {
+    key: 'beat', kind: 'fn', category: '音频', signature: 'beat()',
+    placeholder: '{beat():0.00}', desc: '节拍脉冲 0..1：每检出一拍置 1，然后衰减', implemented: true,
+  },
+
 ];
