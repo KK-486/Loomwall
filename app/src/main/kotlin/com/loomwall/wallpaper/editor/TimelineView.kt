@@ -18,6 +18,8 @@ fun AnimatableProperty.displayName(): String = when (this) {
     AnimatableProperty.SCALE -> "缩放"
     AnimatableProperty.ROTATION_Z -> "旋转"
     AnimatableProperty.OPACITY -> "透明度"
+    AnimatableProperty.WIDTH -> "宽度"
+    AnimatableProperty.HEIGHT -> "高度"
 }
 
 /**

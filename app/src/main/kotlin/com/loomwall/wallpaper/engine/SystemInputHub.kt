@@ -307,10 +307,54 @@ class SystemInputHub(
         val steps = ExternalVars.stepsToday
         if (steps != null) snapshot[SystemVars.STEPS_TODAY] = steps
 
-        val texts = HashMap<String, String>()
-        if (ExternalVars.mediaTitle.isNotBlank()) {
-            texts[SystemVars.MEDIA_TITLE] = ExternalVars.mediaTitle
+        // 媒体数值：进度条 / 播放状态可以直接绑定，不必在模板里写表达式
+        snapshot[SystemVars.MEDIA_PLAYING] = if (ExternalVars.mediaPlaying) 1f else 0f
+        snapshot[SystemVars.MEDIA_POSITION] = ExternalVars.mediaPositionMs / 1000f
+        snapshot[SystemVars.MEDIA_DURATION] = ExternalVars.mediaDurationMs / 1000f
+        snapshot[SystemVars.MEDIA_PROGRESS] = if (ExternalVars.mediaDurationMs > 0L) {
+            (ExternalVars.mediaPositionMs.toFloat() * 100f / ExternalVars.mediaDurationMs)
+                .coerceIn(0f, 100f)
+        } else 0f
+
+        // 音频可视化：没有采集时这些值恒为 0，变量仍然可读（预设不会因此报错）
+        snapshot[SystemVars.AUDIO_LEVEL] = ExternalVars.audioLevel
+        snapshot[SystemVars.AUDIO_BASS] = ExternalVars.audioBass
+        snapshot[SystemVars.AUDIO_MID] = ExternalVars.audioMid
+        snapshot[SystemVars.AUDIO_TREBLE] = ExternalVars.audioTreble
+        snapshot[SystemVars.AUDIO_BEAT] = ExternalVars.audioBeat
+
+        // 天气：没拿到过数据（weatherUpdatedMs == 0）时也照常发布，
+        // 让文本显示空字符串、数值显示 0，而不是整段占位符不替换
+        snapshot[SystemVars.WEATHER_TEMP] = ExternalVars.weatherTemp
+        snapshot[SystemVars.WEATHER_FEELS_LIKE] = ExternalVars.weatherFeelsLike
+        snapshot[SystemVars.WEATHER_HUMIDITY] = ExternalVars.weatherHumidity
+        snapshot[SystemVars.WEATHER_CODE] = ExternalVars.weatherCode
+        snapshot[SystemVars.WEATHER_WIND] = ExternalVars.weatherWind
+        snapshot[SystemVars.WEATHER_PRECIP] = ExternalVars.weatherPrecip
+        snapshot[SystemVars.WEATHER_IS_DAY] = ExternalVars.weatherIsDay
+        snapshot[SystemVars.WEATHER_UPDATED] = if (ExternalVars.weatherUpdatedMs == 0L) 999f
+        else ((System.currentTimeMillis() - ExternalVars.weatherUpdatedMs) / 60_000L).toFloat()
+        val bands = ExternalVars.audioBands
+        for (i in 0 until 8) {
+            // 命名 b1..b8：给创作者看的下标从 1 开始更自然
+            snapshot["sys.audio.b" + (i + 1)] = bands[i]
         }
+
+        val texts = HashMap<String, String>()
+        fun putText(name: String, value: String) {
+            if (value.isNotBlank()) texts[name] = value
+        }
+        putText(SystemVars.MEDIA_TITLE, ExternalVars.mediaTitle)
+        putText(SystemVars.MEDIA_ARTIST, ExternalVars.mediaArtist)
+        putText(SystemVars.MEDIA_ALBUM, ExternalVars.mediaAlbum)
+        putText(SystemVars.MEDIA_APP, ExternalVars.mediaApp)
+        // 歌词允许为空：空串表示"这段没有歌词"，模板里该显示空白而不是留着上一句
+        texts[SystemVars.WEATHER_TEXT] = ExternalVars.weatherText
+        texts[SystemVars.WEATHER_CITY] = ExternalVars.weatherCity
+        texts[SystemVars.WEATHER_DISTRICT] = ExternalVars.weatherDistrict
+        texts[SystemVars.MEDIA_LYRIC] = ExternalVars.mediaLyric
+        texts[SystemVars.MEDIA_LYRIC_TRANS] = ExternalVars.mediaLyricTrans
+        texts[SystemVars.MEDIA_LYRIC_NEXT] = ExternalVars.mediaLyricNext
 
         VarsSnapshot.publish(snapshot, texts)
         onChanged()

@@ -21,7 +21,7 @@ object EngineVersion {
     const val SCENE_FORMAT = "0.2"
 
     /** interactions.json 结构版本。 */
-    const val INTERACTIONS_FORMAT = "0.6"
+    const val INTERACTIONS_FORMAT = "0.8"
 
     /**
      * 解析器接受的交互动格式版本。
@@ -31,10 +31,13 @@ object EngineVersion {
      */
     /**
      * 0.3 新增 vars / rules / functions；0.4 给动作加了 repeat / intervalMs；
-     * 0.5 新增 for / while 循环动作（do 数组 + 迭代上限）。0.1~0.4 继续可用：
-     * 没有循环的旧预设语义完全不变，没必要逼作者改版本号。
+     * 0.5 新增 for / while 循环动作（do 数组 + 迭代上限）；
+     * 0.6 新增 parallax（倾斜视差）；0.7 新增 width / height 两个可动画属性；
+     * 0.8 绑定支持 expr 表达式（可用 audio(i) 等音频函数）。
+     * 旧预设语义完全不变，所以 0.1~0.6 继续接受，没必要逼作者改版本号。
      */
-    val ACCEPTED_INTERACTIONS_FORMATS = setOf("0.1", "0.2", "0.3", "0.4", "0.5", INTERACTIONS_FORMAT)
+    val ACCEPTED_INTERACTIONS_FORMATS =
+        setOf("0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", INTERACTIONS_FORMAT)
 
     /**
      * 解析器接受的 scene 格式版本。

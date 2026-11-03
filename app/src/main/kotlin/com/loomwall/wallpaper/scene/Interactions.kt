@@ -72,7 +72,17 @@ enum class AnimatableProperty(val jsonName: String) {
     Y("y"),
     SCALE("scale"),
     ROTATION_Z("rotationZ"),
-    OPACITY("opacity");
+    OPACITY("opacity"),
+
+    /**
+     * 宽 / 高（画布单位，与 scene 里的 width / height 同量纲）。
+     *
+     * 为什么现在才加：几何变化会牵动布局与纹理。当前实现是**改变盒子尺寸**：
+     * 纯色形状重新三角化（便宜），文本 / 路径 / 图片按新盒子拉伸已有纹理（也便宜）。
+     * 代价是从不重新排版文字——做打字机式的"逐字露出"需要用遮罩，不是改宽高。
+     */
+    WIDTH("width"),
+    HEIGHT("height");
 
     companion object {
         fun fromJson(name: String): AnimatableProperty? = entries.firstOrNull { it.jsonName == name }
@@ -144,5 +154,8 @@ data class NodeOverrides(
     val y: Float? = null,
     val scale: Float? = null,
     val rotationZ: Float? = null,
-    val opacity: Float? = null
+    val opacity: Float? = null,
+    /** 覆盖盒子的宽 / 高（画布单位）。null = 沿用场景里的静态尺寸。 */
+    val width: Float? = null,
+    val height: Float? = null
 )

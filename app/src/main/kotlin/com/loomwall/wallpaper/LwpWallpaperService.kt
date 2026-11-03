@@ -182,10 +182,18 @@ class LwpWallpaperService : WallpaperService() {
                 registerReceiver(receiver, filter)
             }
             reloadReceiver = receiver
+            // 音频可视化需要 Context 才能建 Visualizer；在引擎创建时挂上
+            com.loomwall.wallpaper.engine.AudioLevelSource.attachContext(applicationContext)
+        com.loomwall.wallpaper.net.WeatherSource.attachContext(applicationContext)
             renderThread = RenderThread(
                 sceneSource = { presetStore.loadActive() },
                 resourcesDirProvider = { presetStore.activeResourcesDir() },
-                onFps = { fps -> systemVars?.notifyFps(fps) },
+                onFps = { fps ->
+                    systemVars?.notifyFps(fps)
+                    // 只在真的在画的时候出现（约每 2 秒一条），用于定位"看着卡但不知道多少帧"
+                    // 这类问题：倾斜视差时应该是 50~60；若恒等于 30 说明仍是单事件单帧。
+                    if (fps > 0f) Log.d("LOOW.Fps", String.format("fps=%.1f", fps))
+                },
                 onLaunch = { action -> launchFromWallpaper(action) },
                 context = applicationContext,
                 onBindingsChanged = { has ->
@@ -208,6 +216,11 @@ class LwpWallpaperService : WallpaperService() {
             renderThread?.onVisibilityChanged(visible)
             // 功耗红线：不可见时连系统广播/定时器一起注销，不留任何唤醒源。
             updateSystemVars()
+            // 播放进度轮询同理：可见才补，不可见立刻停（媒体元数据仍是事件驱动）
+            com.loomwall.wallpaper.net.NotificationRelay.setWallpaperVisible(visible)
+            // 音频可视化只在可见 + 预设引用时才采集，否则立即释放录音链路
+            com.loomwall.wallpaper.engine.AudioLevelSource.setVisible(visible)
+        com.loomwall.wallpaper.net.WeatherSource.setVisible(visible)
         }
 
         /**

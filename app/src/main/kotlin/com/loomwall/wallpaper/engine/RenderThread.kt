@@ -67,6 +67,21 @@ internal class RenderThread(
     @Volatile
     private var parallaxSettings = com.loomwall.wallpaper.scene.ParallaxSettings.DEFAULT
 
+    /**
+     * 视差显示值（渲染线程独占）。
+     *
+     * 传感器按 30Hz 送值，如果"来一个事件画一帧"，画面就是 30fps，且帧间隔与 vsync
+     * 对不齐，看起来像 25fps 卡顿（用户实测：手机卡、浏览器预览顺）。
+     * 这里保留一个显示值，每帧朝传感器目标做时间相关插值：输入仍是 30Hz（省电不变），
+     * 输出跟着 vsync 平滑过渡，收敛后立即停止绘制。
+     */
+    /** 音频插值用的上一帧时间戳（渲染线程独占）。 */
+    private var lastAudioTickNs = 0L
+
+    private var tiltShownX = 0f
+    private var tiltShownY = 0f
+    private var lastFrameNs = 0L
+
     /** 触发器运行时：vars/rules/functions 的求值器。为空表示预设没有规则。 */
     /**
      * 活跃的属性补间（动画）。每帧推进，进度结束后移除。
@@ -74,8 +89,13 @@ internal class RenderThread(
      * 为什么放在渲染线程而不是 RuleRuntime：补间需要"每帧"推进，
      * 而规则只在事件发生时跑一次；放这里才能保证帧循环里被消费。
      */
-    /** 规则能动的属性。width/height 属于几何，暂不支持（要让布局回流，成本高得多）。 */
-    private val SUPPORTED_RULE_PROPS = setOf("x", "y", "scale", "rotationZ", "opacity")
+    /**
+     * 规则能动的属性。
+     *
+     * width / height 是几何量：纯色形状重新三角化、贴图类元素按新盒子拉伸，
+     * 都不需要重排布局，所以可以进白名单（此前误判为"成本高"而排除）。
+     */
+    private val SUPPORTED_RULE_PROPS = setOf("x", "y", "scale", "rotationZ", "opacity", "width", "height")
 
     private val tweens = ArrayList<PropTween>()
 
@@ -100,6 +120,8 @@ internal class RenderThread(
         "scale" -> base.copy(scale = value)
         "rotationZ" -> base.copy(rotationZ = value)
         "opacity" -> base.copy(opacity = value)
+        "width" -> base.copy(width = value.coerceAtLeast(0f))
+        "height" -> base.copy(height = value.coerceAtLeast(0f))
         else -> base
     }
 
@@ -425,8 +447,28 @@ internal class RenderThread(
             // 常驻动画在壁纸可见后自动开始；点击动画等命中再开始。
             runtime?.ensureAlwaysStarted(nowMs)
             val animationOverrides = runtime?.evaluate(nowMs) ?: emptyMap()
+
+            // 音频可视化：采样只有约 20Hz，直接画会"一格一格跳"。
+            // 这里每帧把显示值朝目标推进一次，20Hz 的数据在 90fps 上就是连续的。
+            val audioDt = run {
+                val nowNs = System.nanoTime()
+                val d = if (lastAudioTickNs == 0L) 0f
+                else ((nowNs - lastAudioTickNs) / 1_000_000_000.0).toFloat().coerceIn(0f, 0.05f)
+                lastAudioTickNs = nowNs
+                d
+            }
+            val audioBands = AudioLevelSource.tick(audioDt)
+            // 有采集时给这一帧打一份带频谱值的变量表；没有采集就复用快照，不产生分配
+            val varsNow = if (audioBands != null) {
+                val merged = HashMap(VarsSnapshot.get())
+                for (i in 0 until 8) merged["sys.audio.b" + (i + 1)] = audioBands[i]
+                merged
+            } else {
+                VarsSnapshot.get()
+            }
+
             // 系统变量绑定（电量/内存/时间等）：动画优先，绑定兜底
-            val boundOverrides = BindingEvaluator.evaluate(bindings, VarsSnapshot.get())
+            val boundOverrides = BindingEvaluator.evaluate(bindings, varsNow)
             val overrides = BindingEvaluator.merge(animationOverrides, boundOverrides)
             // 规则覆盖：与动画/绑定合并（动画优先，绑定次之，规则垫底）
             val withRules = if (ruleProps.isEmpty()) {
@@ -437,10 +479,27 @@ internal class RenderThread(
             // 全局开关只管"跟随全局"的图层，不能把倾斜值一起清零：
             // 图层自己开了视差时要照常响应，否则单层视差在手机上永远不动。
             val anyOwnParallax = scene?.parallax?.values?.any { it.custom && it.enabled } == true
-            val tilt = debugTilt
+            val tiltTarget = debugTilt
                 ?: (if (parallaxSettings.enabled || anyOwnParallax) TiltSource.tilt() else ZERO_TILT)
+
+            // 帧级插值：把 30Hz 的传感器输入摊到每一帧上，避免"一个事件一帧"的阶梯感。
+            // 用时间常数而不是固定步长，掉帧或首帧都不会突变。
+            val frameNs = System.nanoTime()
+            val dtSec = if (lastFrameNs == 0L) 0f
+            else ((frameNs - lastFrameNs) / 1_000_000_000.0).toFloat().coerceIn(0f, 0.05f)
+            lastFrameNs = frameNs
+            val coeff = if (dtSec <= 0f) 1f
+            else (1.0 - kotlin.math.exp(-dtSec / TILT_FOLLOW_TAU_SEC)).toFloat()
+            tiltShownX += (tiltTarget[0] - tiltShownX) * coeff
+            tiltShownY += (tiltTarget[1] - tiltShownY) * coeff
+            val tiltSettling = kotlin.math.abs(tiltTarget[0] - tiltShownX) > TILT_EPSILON ||
+                kotlin.math.abs(tiltTarget[1] - tiltShownY) > TILT_EPSILON
+            // 调试注入时直接给值，不做跟随（否则改文件看不到即时效果）
+            val tilt = if (debugTilt != null) tiltTarget
+            else floatArrayOf(tiltShownX, tiltShownY)
+
             renderer.draw(
-                scene, null, withRules, VarsSnapshot.get(), VarsSnapshot.getTexts(),
+                scene, null, withRules, varsNow, VarsSnapshot.getTexts(),
                 parallaxSettings = parallaxSettings,
                 tilt = tilt
             )
@@ -463,8 +522,10 @@ internal class RenderThread(
             }
 
             synchronized(lock) {
-                // 动画还在跑就继续请求下一帧；静止场景保持不画，这是功耗红线的落地。
-                needsRender = runtime?.isAnimating() == true
+                // 动画还在跑、或视差还没跟上目标值，就继续请求下一帧；
+                // 都收敛后立即停止绘制，这是功耗红线的落地。
+                needsRender = runtime?.isAnimating() == true || tiltSettling ||
+                    AudioLevelSource.isSettling
             }
             return true
         } catch (t: Throwable) {
@@ -670,6 +731,86 @@ Log.i(TAG, "规则执行 " + ruleCount + " 条（命中=" + (hitId ?: "(画布)"
         Log.i(TAG, "点击命中 ${hit.id}，触发动画=$started，规则=$ruleCount")
     }
 
+    /**
+     * 这个预设是否引用了音频变量（sys.audio.*）。
+     *
+     * 为什么要判断：Visualizer 需要录音权限，并且会以约 30Hz 持续回调。
+     * 绝大多数壁纸不做音频可视化，不能为此让每个预设都白白付出这份功耗。
+     * 检查范围：绑定数据源、文本模板、规则/触发器表达式；只在加载预设时跑一次。
+     */
+    /**
+     * 预设是否用到天气变量（文本里写 `{sys.weather.temp}`，或绑定源是 sys.weather.*）。
+     *
+     * 为什么要判断：天气要联网、要定位，没人用的时候一次请求都不该发。
+     */
+    private fun usesWeatherVars(preset: com.loomwall.wallpaper.scene.PresetStore.Preset): Boolean {
+        if (preset.interactions.bindings.any { it.expr?.contains("sys.weather.") == true }) return true
+        if (preset.interactions.bindings.any { it.source.startsWith("sys.weather.") }) return true
+        if (preset.interactions.toString().contains("sys.weather.")) return true
+
+        var found = false
+        fun scan(node: com.loomwall.wallpaper.scene.SceneNode) {
+            if (found) return
+            if (node is com.loomwall.wallpaper.scene.TextNode && node.text.contains("sys.weather.")) {
+                found = true
+                return
+            }
+            if (node is com.loomwall.wallpaper.scene.ContainerNode) {
+                for (child in node.children) scan(child)
+            }
+        }
+        scan(preset.scene.root)
+        return found
+    }
+
+    private fun usesAudioVars(preset: com.loomwall.wallpaper.scene.PresetStore.Preset): Boolean {
+        if (preset.interactions.bindings.any { it.source.startsWith("sys.audio.") }) return true
+        if (preset.interactions.toString().contains("sys.audio.")) return true
+        // 表达式绑定里写的是函数（audio(3) / beat()），展开前后都不带 sys.audio. 前缀，
+        // 只看字符串会漏掉整类预设——漏掉就等于频谱永远是 0（用户实测：柱子不动）
+        if (preset.interactions.bindings.any { binding ->
+                val expr = binding.expr
+                expr != null && usesAudioInText(expr)
+            }
+        ) return true
+
+        var found = false
+        fun scanNode(node: com.loomwall.wallpaper.scene.SceneNode) {
+            if (found) return
+            if (node is com.loomwall.wallpaper.scene.TextNode) {
+                // 两种写法都要认：
+                //   1) 变量式 {sys.audio.b3}
+                //   2) 函数式 {audio(3)} / {beat()} —— 只在文本里写函数时也必须开启采集，
+                //      否则数据永远是 0，用户会以为"函数没用"
+                if (usesAudioInText(node.text)) {
+                    found = true
+                    return
+                }
+            }
+            if (node is com.loomwall.wallpaper.scene.ContainerNode) {
+                for (child in node.children) scanNode(child)
+            }
+        }
+        scanNode(preset.scene.root)
+        return found
+    }
+
+    /**
+     * 文本/表达式里是否用到了音频变量或函数。
+     *
+     * 注意两种写法都要认：
+     * - 文本模板：`{sys.audio.b3}` 或 `{audio(3)}`（带花括号）
+     * - 绑定表达式：`0.8 + 39.2 * audio(1)^0.6`（**没有花括号**）
+     * 之前只查 `{函数(`，于是表达式绑定的预设音频采集永远不开，柱子在手机上不动。
+     */
+    private fun usesAudioInText(text: String): Boolean {
+        if (text.contains("sys.audio.")) return true
+        for (name in AUDIO_FUNCS) {
+            if (Regex("""\b$name\s*\(""").containsMatchIn(text)) return true
+        }
+        return false
+    }
+
     private fun ensureSceneLoaded() {
         if (sceneLoaded) return
         sceneLoaded = true
@@ -678,6 +819,10 @@ Log.i(TAG, "规则执行 " + ruleCount + " 条（命中=" + (hitId ?: "(画布)"
                 scene = result.preset.scene
                 bindings = result.preset.interactions.bindings
                 events = result.preset.interactions.events
+                // 音频采集很贵（录音权限 + 30Hz 回调）：只有这个预设真的引用 sys.audio.* 才开
+                AudioLevelSource.setNeeded(usesAudioVars(result.preset))
+                // 天气要联网：同样只在预设真的引用 sys.weather.* 时才启用
+                com.loomwall.wallpaper.net.WeatherSource.setNeeded(usesWeatherVars(result.preset))
                 // 规则隐藏状态属于运行期，跨预设必须清空（否则新预设里 visible:true 的节点仍不显示）
                 renderer.clearHiddenNodes()
                 repeatJobs.clear()
@@ -870,6 +1015,15 @@ Log.i(TAG, "规则执行 " + ruleCount + " 条（命中=" + (hitId ?: "(画布)"
 
     private companion object {
         const val TAG = "LOOW.Render"
+
+        /** 文本模板里的音频函数名（与 TextTemplate.callFunction 保持一致）。 */
+        val AUDIO_FUNCS = listOf("audio", "band", "bass", "mid", "treble", "level", "beat")
+
+        /** 视差显示值收敛的时间常数（秒）：越小越"跟手"，越大越平滑。45ms 兼顾两者。 */
+        const val TILT_FOLLOW_TAU_SEC = 0.045
+
+        /** 与目标的差值小于此值视为已收敛，停止为视差单独续帧（省电）。 */
+        const val TILT_EPSILON = 0.0008f
     }
 }
 

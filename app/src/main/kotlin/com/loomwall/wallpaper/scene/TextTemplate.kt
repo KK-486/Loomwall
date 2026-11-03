@@ -126,7 +126,7 @@ object TextTemplate {
         val format = if (rest.startsWith(":")) rest.substring(1) else ""
 
         if (args != null) {
-            return callFunction(name, args, nowMillis, vars, texts) ?: raw
+            return callFunction(name, args, nowMillis, vars, texts, format) ?: raw
         }
         texts[name]?.let { return it }
         val value = vars[name]
@@ -184,7 +184,8 @@ object TextTemplate {
         args: String,
         nowMillis: Long,
         vars: Map<String, Float>,
-        texts: Map<String, String>
+        texts: Map<String, String>,
+        format: String = ""
     ): String? = when (name) {
         DF -> {
             val pattern = args.ifBlank { "HH:mm" }
@@ -194,8 +195,22 @@ object TextTemplate {
             }.getOrNull()
         }
         IF -> evalIf(args, vars, texts)
+        // ---- 音频可视化：把 8 段频谱/三频段/节拍暴露成函数，任意文本都能取用 ----
+        // 用法：{audio(3)} 第 3 段；{audio(3):0.00} 保留两位；{beat()} 节拍脉冲
+        "audio", "band" -> {
+            val index = args.trim().toIntOrNull()?.coerceIn(1, AUDIO_BANDS)
+            if (index == null) null else formatValue(vars["sys.audio.b$index"] ?: 0f, format)
+        }
+        "level" -> formatValue(vars["sys.audio.level"] ?: 0f, format)
+        "bass" -> formatValue(vars["sys.audio.bass"] ?: 0f, format)
+        "mid" -> formatValue(vars["sys.audio.mid"] ?: 0f, format)
+        "treble" -> formatValue(vars["sys.audio.treble"] ?: 0f, format)
+        "beat" -> formatValue(vars["sys.audio.beat"] ?: 0f, format)
         else -> null
     }
+
+    /** 频谱段数，与引擎 AudioLevelSource.BAND_COUNT 保持一致。 */
+    private const val AUDIO_BANDS = 8
 
     /**
      * `{if(条件, 真, 假)}` —— 三参数条件，取第一个分支。

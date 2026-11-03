@@ -115,6 +115,25 @@ object InteractionsParser {
         val propertyName = requireString(json, "property", path)
         val property = AnimatableProperty.fromJson(propertyName)
             ?: throw SceneFormatException("$path/property", "未知属性 \"$propertyName\"")
+        val expr = (json.opt("expr") as? String)?.trim()?.takeIf { it.isNotEmpty() }
+
+        if (expr != null) {
+            // 表达式模式：source 只是说明性字段，可以不写；in/out 也不需要。
+            // 但表达式必须能解析——在加载期就报错，别等到渲染线程里静默变 0。
+            BindingExpr.validate(expr, "$path/expr")
+            val source = (json.opt("source") as? String).orEmpty()
+            return Binding(
+                targetId = targetId,
+                property = property,
+                source = source,
+                inMin = 0f,
+                inMax = 1f,
+                outMin = 0f,
+                outMax = 1f,
+                expr = expr
+            )
+        }
+
         val source = requireString(json, "source", path)
         if (!SystemVars.isNumeric(source)) {
             throw SceneFormatException(

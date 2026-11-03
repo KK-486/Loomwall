@@ -209,15 +209,18 @@ internal class SceneRenderer {
                 // 选中框贴着真实形状：选圆形/星形时框也是圆/星
                 val shape = if (selected is RectNode) selected.shape else ShapeKind.RECT
                 val sides = if (selected is RectNode) selected.sides else 4
+                val selOverride = overrides[selectedId]
+                val selW = effWidth(selected, selOverride)
+                val selH = effHeight(selected, selOverride)
                 val points = if (selected is RectNode) {
                     Shapes.effectivePoints(
                         selected.shape, selected.sides, selected.cornerRadius,
                         selected.mask, selected.maskSides,
-                        nodeWidth(selected), nodeHeight(selected),
+                        selW, selH,
                         selected.maskX, selected.maskY, selected.maskW, selected.maskH
                     )
                 } else {
-                    Shapes.points(shape, sides, nodeWidth(selected), nodeHeight(selected))
+                    Shapes.points(shape, sides, selW, selH)
                 }
                 val loopCount = stageLoop(world, points)
                 GLES20.glUniform4f(uColor, 1f, 0.86f, 0.3f, 0.95f)
@@ -295,14 +298,16 @@ internal class SceneRenderer {
                     useSolidProgram()
                     val alpha = effectiveAlpha(node.opacity, override?.opacity)
                     val c = node.background.modulatedBy(alpha)
-                    val points = Shapes.points(ShapeKind.RECT, 4, node.width, node.height)
-                    val fanCount = stageFan(world, points, node.width / 2f, node.height / 2f)
+                    val boxW = effWidth(node, override)
+                    val boxH = effHeight(node, override)
+                    val points = Shapes.points(ShapeKind.RECT, 4, boxW, boxH)
+                    val fanCount = stageFan(world, points, boxW / 2f, boxH / 2f)
                     GLES20.glUniform4f(uColor, c.r, c.g, c.b, c.a)
                     GLES20.glDrawArrays(GLES20.GL_TRIANGLE_FAN, 0, fanCount)
                 }
                 // 裁剪子元素：等价 CSS 的 overflow: hidden。clip=false 可关掉。
                 val clipped = !node.isRoot && node.clip
-                if (clipped) pushScissor(world, node.width, node.height)
+                if (clipped) pushScissor(world, effWidth(node, override), effHeight(node, override))
                 for (child in node.children) drawNode(child, world, overrides, vars, texts)
                 if (clipped) popScissor()
             }
@@ -314,7 +319,11 @@ internal class SceneRenderer {
                     val texture = pathCache.textureFor(node, surfaceWidth)
                     if (texture != null) {
                         useTextProgram()
-                        stageTexturedQuad(withParallax(parent, node, override), node.width, node.height)
+                        stageTexturedQuad(
+                            withParallax(parent, node, override),
+                            effWidth(node, override),
+                            effHeight(node, override)
+                        )
                         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
                         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture.textureId)
                         GLES20.glUniform1i(uTexture, 0)
@@ -329,8 +338,10 @@ internal class SceneRenderer {
                 val world = withParallax(parent, node, override)
                 // 形状统一按"中心 + 一圈边界点"画三角形扇：
                 // 矩形/椭圆/三角/梯形/多边形/星形都满足关于中心可见，扇面覆盖即正确
-                val points = Shapes.points(node.shape, node.sides, node.width, node.height)
-                val fanCount = stageFan(world, points, node.width / 2f, node.height / 2f)
+                val boxW = effWidth(node, override)
+                val boxH = effHeight(node, override)
+                val points = Shapes.points(node.shape, node.sides, boxW, boxH)
+                val fanCount = stageFan(world, points, boxW / 2f, boxH / 2f)
                 val alpha = effectiveAlpha(node.opacity, override?.opacity)
                 val c = node.color.modulatedBy(alpha)
                 GLES20.glUniform4f(uColor, c.r, c.g, c.b, c.a)
@@ -364,8 +375,9 @@ internal class SceneRenderer {
         val geometry = nodeGeometry(node)
         val x = override?.x ?: geometry[0]
         val y = override?.y ?: geometry[1]
-        val width = geometry[2]
-        val height = geometry[3]
+        // 宽高可用动画覆盖：中心点随盒子变化，缩放/旋转仍绕盒子中心
+        val width = override?.width ?: geometry[2]
+        val height = override?.height ?: geometry[3]
         val scale = (override?.scale ?: geometry[4]).coerceAtLeast(0.01f)
         val rotation = override?.rotationZ ?: geometry[5]
 
@@ -386,6 +398,18 @@ internal class SceneRenderer {
     private fun nodeWidth(node: SceneNode): Float = nodeGeometry(node)[2]
 
     private fun nodeHeight(node: SceneNode): Float = nodeGeometry(node)[3]
+
+    /**
+     * 本帧实际使用的宽 / 高：动画或绑定给了覆盖值就用覆盖值。
+     *
+     * 为什么要统一从这里取：盒子尺寸同时决定矩阵中心、三角化顶点、裁剪矩形和贴图四边形，
+     * 只要有一处仍读静态值，宽高动画就会"图变形但命中区不变"或"裁剪框不动"。
+     */
+    private fun effWidth(node: SceneNode, override: NodeOverrides?): Float =
+        override?.width ?: nodeGeometry(node)[2]
+
+    private fun effHeight(node: SceneNode, override: NodeOverrides?): Float =
+        override?.height ?: nodeGeometry(node)[3]
 
     private fun findNode(node: SceneNode, id: String): SceneNode? {
         if (node.id == id) return node
@@ -536,8 +560,8 @@ internal class SceneRenderer {
         val inverse = world.invert() ?: return null
         val localX = inverse.mapX(x, y)
         val localY = inverse.mapY(x, y)
-        val width = nodeWidth(node)
-        val height = nodeHeight(node)
+        val width = effWidth(node, override)
+        val height = effHeight(node, override)
         // 形状元素按真实轮廓判定：否则点圆形的空白角落也会触发
         val shape = if (node is RectNode) node.shape else ShapeKind.RECT
         val sides = if (node is RectNode) node.sides else 4
@@ -580,7 +604,7 @@ internal class SceneRenderer {
         val rendered = TextTemplate.render(node.text, vars, texts = texts)
         val texture = textCache.textureFor(node, rendered, surfaceWidth) ?: return
 
-        stageTexturedQuad(world, node.width, node.height)
+        stageTexturedQuad(world, effWidth(node, override), effHeight(node, override))
 
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture.textureId)
@@ -600,7 +624,7 @@ internal class SceneRenderer {
             node.maskX, node.maskY, node.maskW, node.maskH
         ) ?: return
 
-        stageTexturedQuad(world, node.width, node.height)
+        stageTexturedQuad(world, effWidth(node, override), effHeight(node, override))
 
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture.textureId)
@@ -717,39 +741,26 @@ internal class SceneRenderer {
     fun staticPropertyOf(nodeId: String, property: String): Float? {
         val node = findNodeById(nodeId) ?: return null
         return when (node) {
-            is RectNode -> when (property) {
-                "x" -> node.x
-                "y" -> node.y
-                "scale" -> node.scale
-                "rotationZ" -> node.rotationZ
-                "opacity" -> node.opacity
-                else -> null
-            }
-            is TextNode -> when (property) {
-                "x" -> node.x
-                "y" -> node.y
-                "scale" -> node.scale
-                "rotationZ" -> node.rotationZ
-                "opacity" -> node.opacity
-                else -> null
-            }
-            is ImageNode -> when (property) {
-                "x" -> node.x
-                "y" -> node.y
-                "scale" -> node.scale
-                "rotationZ" -> node.rotationZ
-                "opacity" -> node.opacity
-                else -> null
-            }
-            is ContainerNode -> when (property) {
-                "x" -> node.x
-                "y" -> node.y
-                "scale" -> node.scale
-                "rotationZ" -> node.rotationZ
-                "opacity" -> node.opacity
-                else -> null
-            }
+            is RectNode -> staticPropOf(node.x, node.y, node.width, node.height, node.scale, node.rotationZ, node.opacity, property)
+            is TextNode -> staticPropOf(node.x, node.y, node.width, node.height, node.scale, node.rotationZ, node.opacity, property)
+            is ImageNode -> staticPropOf(node.x, node.y, node.width, node.height, node.scale, node.rotationZ, node.opacity, property)
+            is ContainerNode -> staticPropOf(node.x, node.y, node.width, node.height, node.scale, node.rotationZ, node.opacity, property)
         }
+    }
+
+    /** 四种节点字段名一致，取值逻辑只写一份，避免漏加属性时各处行为不一致。 */
+    private fun staticPropOf(
+        x: Float, y: Float, width: Float, height: Float,
+        scale: Float, rotationZ: Float, opacity: Float, property: String
+    ): Float? = when (property) {
+        "x" -> x
+        "y" -> y
+        "width" -> width
+        "height" -> height
+        "scale" -> scale
+        "rotationZ" -> rotationZ
+        "opacity" -> opacity
+        else -> null
     }
 
     /** 节点当前是否应当被绘制/命中：运行期覆盖优先，其次跟随场景。 */

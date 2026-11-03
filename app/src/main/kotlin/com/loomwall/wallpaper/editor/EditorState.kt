@@ -455,11 +455,15 @@ class EditorState(initial: SceneDocument, initialInteractions: Interactions = In
         AnimatableProperty.SCALE -> rect.scale
         AnimatableProperty.ROTATION_Z -> rect.rotationZ
         AnimatableProperty.OPACITY -> rect.opacity
+        AnimatableProperty.WIDTH -> rect.width
+        AnimatableProperty.HEIGHT -> rect.height
     }
 
     private fun clampValue(property: AnimatableProperty, value: Float): Float = when (property) {
         AnimatableProperty.OPACITY -> value.coerceIn(0f, 1f)
         AnimatableProperty.SCALE -> value.coerceIn(0.05f, 10f)
+        // 宽高不能为负：负尺寸会让三角化方向反转
+        AnimatableProperty.WIDTH, AnimatableProperty.HEIGHT -> value.coerceAtLeast(0f)
         else -> value
     }
 

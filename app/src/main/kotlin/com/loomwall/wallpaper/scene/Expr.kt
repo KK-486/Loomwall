@@ -156,7 +156,23 @@ object ExprParser {
             if (matchWord("not")) {
                 return Expr.Unary("not", parseUnary(depth + 1))
             }
-            return parsePrimary(depth)
+            return parsePower(depth)
+        }
+
+        /**
+         * 幂运算：右结合、优先级高于乘除（与数学写法一致）。
+         *
+         * 为什么需要它：音频可视化的常见需求是"做平方响应"（低频更灵敏），
+         * 写成 `audio(2)^2` 比 `audio(2)*audio(2)` 直观得多。
+         */
+        private fun parsePower(depth: Int): Expr {
+            val base = parsePrimary(depth)
+            skipSpaces()
+            if (peek() == '^') {
+                pos++
+                return Expr.Binary("pow", base, parsePower(depth + 1))
+            }
+            return base
         }
 
         private fun parsePrimary(depth: Int): Expr {
@@ -289,6 +305,9 @@ object ExprParser {
                 val l = evaluate(expr.left, ctx)
                 val r = evaluate(expr.right, ctx)
                 when (expr.op) {
+                    "pow" -> ExprValue.Num(
+                        Math.pow(l.asNumber().toDouble(), r.asNumber().toDouble()).toFloat()
+                    )
                     "+" -> ExprValue.Num(l.asNumber() + r.asNumber())
                     "-" -> ExprValue.Num(l.asNumber() - r.asNumber())
                     "*" -> ExprValue.Num(l.asNumber() * r.asNumber())

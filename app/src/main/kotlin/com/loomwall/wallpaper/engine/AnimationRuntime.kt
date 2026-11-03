@@ -30,8 +30,13 @@ internal class AnimationRuntime(private val interactions: Interactions) {
         var scale: Float? = null
         var rotationZ: Float? = null
         var opacity: Float? = null
+        var width: Float? = null
+        var height: Float? = null
 
-        fun snapshot(): NodeOverrides = NodeOverrides(x, y, scale, rotationZ, opacity)
+        fun snapshot(): NodeOverrides = NodeOverrides(
+            x = x, y = y, scale = scale, rotationZ = rotationZ, opacity = opacity,
+            width = width, height = height
+        )
     }
 
     private val running = LinkedHashMap<String, Running>()
@@ -126,6 +131,9 @@ internal class AnimationRuntime(private val interactions: Interactions) {
                     AnimatableProperty.SCALE -> target.scale = value
                     AnimatableProperty.ROTATION_Z -> target.rotationZ = value
                     AnimatableProperty.OPACITY -> target.opacity = value.coerceIn(0f, 1f)
+                    // 宽高不允许为负：负值会让三角化与裁剪矩阵反向，看起来像"整层消失"
+                    AnimatableProperty.WIDTH -> target.width = value.coerceAtLeast(0f)
+                    AnimatableProperty.HEIGHT -> target.height = value.coerceAtLeast(0f)
                 }
             }
             if (!stillRunning) {
@@ -164,7 +172,10 @@ internal class AnimationRuntime(private val interactions: Interactions) {
             y = add.y ?: base.y,
             scale = add.scale ?: base.scale,
             rotationZ = add.rotationZ ?: base.rotationZ,
-            opacity = add.opacity ?: base.opacity
+            opacity = add.opacity ?: base.opacity,
+            // 同 BindingEvaluator.merge：漏掉宽高会让"定格值/多轨道叠加"丢尺寸
+            width = add.width ?: base.width,
+            height = add.height ?: base.height
         )
     }
 

@@ -247,6 +247,7 @@ class MainActivity : Activity() {
             }
         })
         panel.addView(drawerItem("导入壁纸") { closeDrawer(); pickPresetFile() })
+        panel.addView(drawerItem("天气城市") { closeDrawer(); showWeatherCityDialog() })
         panel.addView(drawerItem("关于") { closeDrawer(); showAbout() })
 
         // 电脑端「发送到手机」要填这个地址，放抽屉里随时能看到（之前完全没提示，用户只能猜）
@@ -571,8 +572,14 @@ class MainActivity : Activity() {
 
     private fun showPermissionDialog() {
         val canNotify = hasNotificationAccess()
+        val canAudio = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        val canLocation = checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
         val items = arrayOf(
-            (if (canNotify) "✓ " else "○ ") + "通知使用权（通知数 / 歌曲名）",
+            (if (canNotify) "✓ " else "○ ") + "通知使用权（通知数 / 歌曲名 / 歌词匹配）",
+            (if (canAudio) "✓ " else "○ ") + "录音权限（音频可视化，只需一次）",
+            (if (canLocation) "✓ " else "○ ") + "定位权限（天气；不授权也能用「天气城市」手动指定）",
             "○ 自启动（MIUI 必开，否则壁纸会被杀）",
             "○ 省电策略设为「无限制」",
             "○ 身体活动（今日步数）"
@@ -584,12 +591,55 @@ class MainActivity : Activity() {
                     0 -> runCatching {
                         startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
                     }.onFailure { toast("无法打开通知使用权设置") }
-                    1 -> DeviceSettingsShortcuts.openAutostart(this)
-                    2 -> DeviceSettingsShortcuts.openPowerWhitelist(this)
-                    3 -> requestStepPermission()
+                    1 -> requestPermissions(
+                        arrayOf(android.Manifest.permission.RECORD_AUDIO),
+                        REQUEST_AUDIO
+                    )
+                    2 -> requestPermissions(
+                        arrayOf(
+                            android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                            android.Manifest.permission.ACCESS_FINE_LOCATION
+                        ),
+                        REQUEST_LOCATION
+                    )
+                    3 -> DeviceSettingsShortcuts.openAutostart(this)
+                    4 -> DeviceSettingsShortcuts.openPowerWhitelist(this)
+                    5 -> requestStepPermission()
                 }
             }
             .setPositiveButton("关闭", null)
+            .show()
+    }
+
+    /**
+     * 设置天气城市。
+     *
+     * 为什么需要手动填：MIUI 上定位权限经常被"仅本次允许"或系统层拦截，
+     * 而天气是纯装饰信息，用户能直接说"我在杭州"就没有必要卡在权限上。
+     * 留空 = 跟随定位。
+     */
+    private fun showWeatherCityDialog() {
+        val prefs = getSharedPreferences("loow", MODE_PRIVATE)
+        val input = android.widget.EditText(this).apply {
+            setText(prefs.getString("weather_city", ""))
+            hint = "例如：杭州（留空 = 跟随定位）"
+            setSingleLine(true)
+        }
+        val pad = resources.displayMetrics.density * 20
+        val wrap = android.widget.FrameLayout(this).apply {
+            setPadding(pad.toInt(), pad.toInt() / 2, pad.toInt(), 0)
+            addView(input)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("天气城市")
+            .setView(wrap)
+            .setPositiveButton("保存") { _, _ ->
+                val city = input.text.toString().trim()
+                com.loomwall.wallpaper.net.WeatherSource.setCity(city)
+                com.loomwall.wallpaper.net.WeatherSource.refreshNow()
+                toast(if (city.isBlank()) "已改为跟随定位" else "已设为 $city，稍后生效")
+            }
+            .setNegativeButton("取消", null)
             .show()
     }
 
@@ -623,6 +673,40 @@ class MainActivity : Activity() {
     }
 
     @Deprecated("系统原生 API，项目没有 AndroidX")
+    /**
+     * 录音权限结果：授权成功就立刻让音频源重试一次。
+     *
+     * 为什么需要这一步：壁纸进程可能早就在跑，且已经因为没权限失败过一次；
+     * 不主动重试的话，要等壁纸下次「不可见→可见」才会重建采集链路，用户会以为没生效。
+     */
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_LOCATION) {
+            val granted = grantResults.isNotEmpty() &&
+                grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (granted) {
+                com.loomwall.wallpaper.net.WeatherSource.refreshNow()
+                toast("已授权定位，稍后更新天气")
+            } else {
+                toast("没给定位权限，可以在「天气城市」里手动填写")
+            }
+            return
+        }
+        if (requestCode != REQUEST_AUDIO) return
+        val granted = grantResults.isNotEmpty() &&
+            grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            com.loomwall.wallpaper.engine.AudioLevelSource.retry()
+            toast("录音权限已开启，音频可视化会在壁纸可见时生效")
+        } else {
+            toast("未授权：音频可视化不会工作（其他功能不受影响）")
+        }
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         val uri = data?.data
@@ -742,6 +826,8 @@ class MainActivity : Activity() {
         private const val REQUEST_IMPORT = 1001
         private const val REQUEST_STEPS = 1002
         private const val REQUEST_EXPORT = 1003
+    private const val REQUEST_AUDIO = 1004
+    private const val REQUEST_LOCATION = 1005
         private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
         private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
     }
