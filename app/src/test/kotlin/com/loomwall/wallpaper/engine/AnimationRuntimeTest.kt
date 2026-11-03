@@ -234,4 +234,27 @@ class AnimationRuntimeTest {
         plain.evaluate(1000L)
         assertNull("普通 once 播完应撤掉覆盖值", plain.evaluate(5000L)["rect_a"])
     }
+
+    // ---- 宽高关键帧（0.7 格式新增）----
+
+    @Test
+    fun `宽度轨道能驱动覆盖值`() {
+        val runtime = runtime(property = AnimatableProperty.WIDTH, from = 40f, to = 90f)
+        runtime.onTap("rect_a", nowMs = 0L)
+        assertEquals(40f, runtime.evaluate(0L)["rect_a"]!!.width!!, 1e-3f)
+        val mid = runtime.evaluate(500L)["rect_a"]!!
+        assertEquals(65f, mid.width!!, 1e-3f)
+        assertNull("宽度动画不应该顺手写高", mid.height)
+        // once 播完会撤掉覆盖值，所以这条断言必须放在 1000ms 之前取的那份快照上
+        assertEquals(90f, runtime.evaluate(1000L)["rect_a"]!!.width!!, 1e-3f)
+    }
+
+    @Test
+    fun `onceHold 定格时保留宽高`() {
+        val runtime = runtime(property = AnimatableProperty.HEIGHT, loop = LoopMode.ONCE_HOLD, from = 10f, to = 55f)
+        runtime.onTap("rect_a", nowMs = 0L)
+        runtime.evaluate(1000L)
+        assertFalse(runtime.isAnimating())
+        assertEquals("定格后仍应按尾帧渲染", 55f, runtime.evaluate(9000L)["rect_a"]!!.height!!, 1e-3f)
+    }
 }

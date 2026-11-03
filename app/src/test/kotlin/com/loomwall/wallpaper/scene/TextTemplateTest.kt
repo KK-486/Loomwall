@@ -322,4 +322,32 @@ class TextTemplateTest {
         assertTrue(error is SceneFormatException)
         assertTrue(error!!.message!!.contains("align"))
     }
+// ---- 音频函数（0.7 之后新增的可视化数据源）----
+
+    private fun audioVars(): Map<String, Float> = mapOf(
+        "sys.audio.level" to 0.6f,
+        "sys.audio.bass" to 0.8f,
+        "sys.audio.mid" to 0.45f,
+        "sys.audio.treble" to 0.2f,
+        "sys.audio.beat" to 1f,
+        "sys.audio.b1" to 0.9f,
+        "sys.audio.b3" to 0.35f
+    )
+
+    @Test
+    fun `音频函数能取出频谱与节拍`() {
+        val vars = audioVars()
+        assertEquals("0.900", TextTemplate.render("{audio(1):0.000}", vars))
+        assertEquals("0.350", TextTemplate.render("{band(3):0.000}", vars))
+        assertEquals("0.800", TextTemplate.render("{bass():0.000}", vars))
+        assertEquals("1.000", TextTemplate.render("{beat():0.000}", vars))
+    }
+
+    @Test
+    fun `音频函数越界或缺失时给 0 而不是报错`() {
+        val vars = audioVars()
+        assertEquals("0.000", TextTemplate.render("{audio(99):0.000}", vars))
+        assertEquals("0.000", TextTemplate.render("{audio(5):0.000}", vars))
+        assertEquals("无法识别就原样保留", "{audio(x)}", TextTemplate.render("{audio(x)}", vars))
+    }
 }

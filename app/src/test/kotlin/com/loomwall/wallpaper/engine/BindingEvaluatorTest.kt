@@ -115,4 +115,84 @@ class BindingEvaluatorTest {
             error!!.message!!.contains("sys.battery.level")
         )
     }
+
+    // ---- 宽高作为可动画/可绑定属性（0.7 格式新增）----
+
+    @Test
+    fun `宽高可以被绑定驱动`() {
+        val bindings = listOf(
+            binding(property = AnimatableProperty.WIDTH, outMin = 20f, outMax = 88f),
+            binding(property = AnimatableProperty.HEIGHT, outMin = 10f, outMax = 40f)
+        )
+        val result = BindingEvaluator.evaluate(bindings, mapOf(SystemVars.BATTERY_LEVEL to 50f))
+        val ov = result["rect_a"]!!
+        assertEquals("宽度按区间映射", 54f, ov.width!!, 1e-4f)
+        assertEquals("高度按区间映射", 25f, ov.height!!, 1e-4f)
+    }
+
+    @Test
+    fun `负的宽高会被夹到零而不是反向`() {
+        val bindings = listOf(
+            binding(property = AnimatableProperty.WIDTH, outMin = -30f, outMax = -10f)
+        )
+        val result = BindingEvaluator.evaluate(bindings, mapOf(SystemVars.BATTERY_LEVEL to 0f))
+        assertEquals("负宽度会让三角化方向反转，必须夹到 0", 0f, result["rect_a"]!!.width!!, 1e-6f)
+    }
+
+    @Test
+    fun `动画与绑定合并时宽高不会丢`() {
+        val anim = mapOf("rect_a" to NodeOverrides(width = 60f))
+        val bind = mapOf("rect_a" to NodeOverrides(height = 30f))
+        val merged = BindingEvaluator.merge(anim, bind)
+        assertEquals("动画的宽度要保留", 60f, merged["rect_a"]!!.width!!, 1e-6f)
+        assertEquals("绑定的高度要合并进来", 30f, merged["rect_a"]!!.height!!, 1e-6f)
+    }
+
+    @Test
+    fun `表达式绑定按公式算值并忽略 in out`() {
+        val b = Binding(
+            targetId = "bar", property = AnimatableProperty.HEIGHT,
+            source = "", inMin = 0f, inMax = 1f, outMin = 0f, outMax = 1f,
+            expr = "20 + 60 * audio(3)"
+        )
+        val result = BindingEvaluator.evaluate(listOf(b), mapOf("sys.audio.b3" to 0.5f))
+        assertEquals(50f, result["bar"]!!.height!!, 1e-3f)
+    }
+
+    @Test
+    fun `表达式里能用三频段与节拍`() {
+        val b = Binding(
+            targetId = "dot", property = AnimatableProperty.SCALE,
+            source = "", inMin = 0f, inMax = 1f, outMin = 1f, outMax = 1f,
+            expr = "1 + beat() * 0.4 + bass() * 0.1"
+        )
+        val result = BindingEvaluator.evaluate(
+            listOf(b), mapOf("sys.audio.beat" to 1f, "sys.audio.bass" to 0.5f)
+        )
+        assertEquals(1.45f, result["dot"]!!.scale!!, 1e-3f)
+    }
+
+    @Test
+    fun `表达式写错时不影响其它绑定也不崩`() {
+        val broken = Binding(
+            targetId = "a", property = AnimatableProperty.OPACITY,
+            source = "", inMin = 0f, inMax = 1f, outMin = 0f, outMax = 1f,
+            expr = "oops( +"
+        )
+        val fine = Binding(
+            targetId = "b", property = AnimatableProperty.OPACITY,
+            source = "", inMin = 0f, inMax = 1f, outMin = 0f, outMax = 1f,
+            expr = "0.5"
+        )
+        val result = BindingEvaluator.evaluate(listOf(broken, fine), mapOf("x" to 1f))
+        assertEquals("坏的那条直接跳过", null, result["a"])
+        assertEquals(0.5f, result["b"]!!.opacity!!, 1e-6f)
+    }
+
+    @Test
+    fun `width 与 height 能被解析成对应枚举`() {
+        assertEquals(AnimatableProperty.WIDTH, AnimatableProperty.fromJson("width"))
+        assertEquals(AnimatableProperty.HEIGHT, AnimatableProperty.fromJson("height"))
+        assertEquals("旧属性不受影响", AnimatableProperty.OPACITY, AnimatableProperty.fromJson("opacity"))
+    }
 }
