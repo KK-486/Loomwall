@@ -702,6 +702,36 @@ function viewBoxSize(node, which) {
   return 24;
 }
 
+
+/**
+ * 羽化结果缓存。
+ *
+ * 为什么需要：羽化是逐像素的 JS 循环，而"柔光雾"这类装饰每一帧结果都一样。
+ * 之前每帧重算，单层 700ms，点一下画布要等两三秒。
+ *
+ * 安全性：缓存键只包含"几何 + 颜色 + 羽化"这些**不随时间变化**的字段；
+ * 缩放/旋转/透明度都在外层 transform 上做，不影响这份像素，所以缓存不会挡住动画。
+ */
+const featherCache = new Map();
+const FEATHER_CACHE_MAX = 48;
+
+/** 取一份已羽化好的 canvas（命中缓存则直接返回）。 */
+function featheredCanvas(key, wFull, hFull, build) {
+  const hit = featherCache.get(key);
+  if (hit) return hit;
+  const canvasEl = document.createElement('canvas');
+  canvasEl.width = wFull;
+  canvasEl.height = hFull;
+  const c = canvasEl.getContext('2d');
+  build(c);
+  if (featherCache.size >= FEATHER_CACHE_MAX) featherCache.clear();
+  featherCache.set(key, canvasEl);
+  return canvasEl;
+}
+
+/** 预设/节点改动后调用：形状或颜色变了，旧缓存必须失效。 */
+function invalidateFeatherCache() { featherCache.clear(); }
+
 /**
  * PS 式像素羽化：从四周向内 [bandPx] 像素做渐变，最外圈 alpha = 0，内部不动。
  *
@@ -713,22 +743,36 @@ function viewBoxSize(node, which) {
  */
 
 
-function drawWithAlphaFeather(wPx, hPx, bandPx, drawContent, outlinePoints) {
-  const w = Math.max(1, Math.round(wPx));
-  const h = Math.max(1, Math.round(hPx));
+function drawWithAlphaFeather(wPx, hPx, bandPx, drawContent, outlinePoints, target) {
+  const out = target || ctx;
+  const wFull = Math.max(1, Math.round(wPx));
+  const hFull = Math.max(1, Math.round(hPx));
+
+  // 大元素 + 大羽化时先降采样再羽化：
+  // 羽化只是一条 alpha 渐变带，降到 1/4 边长肉眼几乎看不出差别，
+  // 但逐像素循环的像素数少 16 倍 —— 实测把 700ms 的单层压到几十毫秒。
+  const area = wFull * hFull;
+  const fullQuality = typeof window !== 'undefined' && window.__LOOW_FEATHER_FULL;
+  const s = (!fullQuality && area > 68000) ? Math.max(0.22, Math.sqrt(68000 / area)) : 1;
+  const w = Math.max(1, Math.round(wFull * s));
+  const h = Math.max(1, Math.round(hFull * s));
 
   const content = document.createElement("canvas");
   content.width = w;
   content.height = h;
   const cctx = content.getContext("2d");
+  if (s !== 1) cctx.scale(s, s);
   drawContent(cctx);
 
-  const band = Math.max(1, Math.round(bandPx));
+  const band = Math.max(1, Math.round(bandPx * s));
   const image = cctx.getImageData(0, 0, w, h);
   const data = image.data;
 
   // 有轮廓（蒙版/圆角）时沿轮廓羽化，否则沿矩形边缘（默认逻辑）
-  const outline = outlinePoints && outlinePoints.length >= 3 ? outlinePoints : null;
+  // 轮廓点也是"全分辨率坐标"，要跟着一起缩放
+  const outline = outlinePoints && outlinePoints.length >= 3
+    ? outlinePoints.map(([x, y]) => [x * s, y * s])
+    : null;
 
   for (let y = 0; y < h; y++) {
     const py = y + 0.5;
@@ -758,7 +802,12 @@ function drawWithAlphaFeather(wPx, hPx, bandPx, drawContent, outlinePoints) {
   }
 
   cctx.putImageData(image, 0, 0);
-  ctx.drawImage(content, 0, 0);
+  if (s === 1) {
+    out.drawImage(content, 0, 0);
+  } else {
+    // 放大回原始尺寸：alpha 渐变本身是平滑的，放大不会出现锯齿
+    out.drawImage(content, 0, 0, wFull, hFull);
+  }
 }
 
 /** 射线法：点是否在多边形内。 */
@@ -2064,8 +2113,28 @@ function drawNode(node) {
     };
 
     if (featherPx > 0) {
-      // 形状羽化同样只柔化边缘 alpha
-      drawWithAlphaFeather(wPx, hPx, featherPx, offCtx => paintShape(offCtx), effectivePointsOf(node, wPx, hPx));
+      // 形状羽化同样只柔化边缘 alpha；结果按「几何+颜色」缓存 ——
+      // 柔光雾这类静态装饰只算一次，之后每帧都是一次 drawImage
+      const fk = [
+        'shape', node.id,
+        Math.round(wPx), Math.round(hPx), Math.round(featherPx),
+        node.color, node.gradient || '', node.shape || 'rect', node.sides || 0,
+        node.cornerRadius || 0, node.mask || '',
+        node.maskX || 0, node.maskY || 0, node.maskW ?? 100, node.maskH ?? 100
+      ].join('|');
+      const useCache = !(typeof window !== 'undefined' && window.__LOOW_FEATHER_FULL);
+      const cached = useCache ? featheredCanvas(fk, Math.max(1, Math.round(wPx)), Math.max(1, Math.round(hPx)), c => {
+        drawWithAlphaFeather(wPx, hPx, featherPx, offCtx => paintShape(offCtx), effectivePointsOf(node, wPx, hPx), c);
+      }) : (() => {
+        const cv = document.createElement('canvas');
+        cv.width = Math.max(1, Math.round(wPx)); cv.height = Math.max(1, Math.round(hPx));
+        const c2 = cv.getContext('2d');
+        drawWithAlphaFeather(wPx, hPx, featherPx, offCtx => paintShape(offCtx), effectivePointsOf(node, wPx, hPx), c2);
+        return cv;
+      })();
+      ctx.globalAlpha = clamp(opacity, 0, 1);
+      ctx.drawImage(cached, 0, 0, wPx, hPx);
+      ctx.globalAlpha = 1;
     } else {
       paintShape(null);
     }
@@ -2638,7 +2707,7 @@ function scheduleDraw() {
 }
 
 // ---------------------------------------------------------------- 属性 ID 接口
-// 规范见 docs/property-ids.md：总 ID = 图层名，子 ID = 短属性名，用点连接。
+// 规范：总 ID = 图层名，子 ID = 短属性名，用点连接。
 // 界面上不显示，只给写函数时用；这样"引用某个属性"不必记 JSON 字段全名。
 const ATTR_KEYS = {
   x: 'x', y: 'y', w: 'width', h: 'height',
@@ -5371,6 +5440,7 @@ function importJson(text) {
   else if (data && data.engineMinVersion) state.doc.manifest = data;
   else { status('无法识别：需要预设包 / scene / interactions / manifest'); return; }
 
+  if (typeof invalidateFeatherCache === 'function') invalidateFeatherCache();
   normalizeScene(state.doc.scene);
 
   // 旧文件的 interactions.bindings 要转成「数据绑定」节点，否则面板已隐藏、用户再也看不到
@@ -6433,7 +6503,7 @@ window.addEventListener('resize', () => {
 });
 
 // 版本标记：刷新后看一眼这里，就能确认浏览器是不是真的拿到了新脚本。
-const BUILD_TAG = '2026-11-03-v101weather2';
+const BUILD_TAG = '2026-11-04-v101perf';
 (function () {
   const node = document.getElementById('build');
   if (node) node.textContent = 'build ' + BUILD_TAG;
