@@ -49,6 +49,13 @@ interface RuleEffects {
 
     /** 播放动画片段。 */
     fun playAnimation(clipId: String, reverse: Boolean = false)
+
+    /**
+     * 媒体控制（playPause / next / prev / stop）。
+     *
+     * 默认空实现：老代码 / 测试里的假实现不必跟着改，只有真正接媒体的那一层覆盖它。
+     */
+    fun mediaControl(command: String) {}
 }
 
 class RuleRuntime(
@@ -284,6 +291,7 @@ class RuleRuntime(
                 is RuleAction.PlayAnimation -> effects.playAnimation(action.clipId, action.reverse)
                 is RuleAction.LaunchApp -> effects.launchApp(action.packageName)
                 is RuleAction.OpenUri -> effects.openUri(action.uri)
+                is RuleAction.MediaControl -> effects.mediaControl(action.command)
                 is RuleAction.CallFunction -> callFunction(action, depth, loopDepth)
                 is RuleAction.ForLoop -> runForLoop(action, args, depth, loopDepth)
                 is RuleAction.WhileLoop -> runWhileLoop(action, args, depth, loopDepth)

@@ -152,6 +152,7 @@ object SceneWriter {
         if (node.maskY != 0f) put("maskY", round1(node.maskY))
         if (node.maskW != 100f) put("maskW", round1(node.maskW))
         if (node.maskH != 100f) put("maskH", round1(node.maskH))
+        if (node.maxLines > 0) put("maxLines", node.maxLines)
     }
     private fun rectToJson(rect: RectNode): JSONObject = JSONObject().apply {
         put("id", rect.id)

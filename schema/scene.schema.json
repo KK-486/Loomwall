@@ -270,6 +270,13 @@
           "exclusiveMinimum": 0
         },
         "align": { "enum": ["left", "center", "right"], "default": "left" },
+        "maxLines": {
+          "description": "按图层宽度自动折行的最大行数。0（默认）= 只按 \\n 手动分行，与旧版行为一致；1~20 = 超出截断并加省略号。",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20,
+          "default": 0
+        },
         "color": { "$ref": "#/$defs/color" },
         "opacity": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
         "rotationZ": { "type": "number", "default": 0 },

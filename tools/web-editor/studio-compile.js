@@ -220,6 +220,8 @@ function studioActionOf(node, ctx) {
       }
       return { type: 'playAnimation', clip: p.clip, reverse: p.reverse === 'true' };
     }
+    case 'mediaControl':
+      return ['[动作] 音乐控制 ' + (action.command || 'playPause'), 'act'];
     case 'launchApp': {
       if (!p.package) { ctx.warnings.push('「启动应用」没有包名，已跳过'); return null; }
       return { type: 'launchApp', package: p.package };
@@ -227,6 +229,14 @@ function studioActionOf(node, ctx) {
     case 'openUri': {
       if (!p.uri) { ctx.warnings.push('「打开链接」没有链接，已跳过'); return null; }
       return { type: 'openUri', uri: p.uri };
+    }
+    case 'mediaControl': {
+      const command = p.command || 'playPause';
+      if (STUDIO_MEDIA_COMMANDS.indexOf(command) < 0) {
+        ctx.warnings.push('「音乐控制」命令无效（' + command + '），已按播放/暂停处理');
+        return { type: 'mediaControl', command: 'playPause' };
+      }
+      return { type: 'mediaControl', command };
     }
     case 'callFn': {
       if (!p.name) { ctx.warnings.push('「调用函数」没有函数名，已跳过'); return null; }
@@ -716,7 +726,8 @@ function toBool(v) {
 const STUDIO_EASING_NAMES = ['linear', 'easeIn', 'easeOut', 'easeInOut', 'backOut', 'bounceOut'];
 const TRIGGER_TYPES = ['tap', 'gesture', 'var', 'minute', 'session'];
 const GESTURE_KINDS = ['tap', 'doubleTap', 'longPress', 'swipeLeft', 'swipeRight', 'swipeUp', 'swipeDown'];
-const ACTION_TYPES = ['setVar', 'setVisible', 'setProperty', 'playAnimation', 'launchApp', 'openUri', 'call', 'for', 'while'];
+const ACTION_TYPES = ['setVar', 'setVisible', 'setProperty', 'playAnimation', 'launchApp', 'openUri', 'mediaControl', 'call', 'for', 'while'];
+const STUDIO_MEDIA_COMMANDS = ['playPause', 'next', 'prev', 'stop'];
 const PROPERTY_NAMES = ['x', 'y', 'scale', 'rotationZ', 'opacity'];
 
 function validateStudioModel(model) {
@@ -748,6 +759,7 @@ function validateStudioModel(model) {
       if (a.type === 'playAnimation' && !a.clip) errors.push(ap + '/clip：缺少动画 id');
       if (a.type === 'launchApp' && !a.package) errors.push(ap + '/package：缺少包名');
       if (a.type === 'openUri' && !a.uri) errors.push(ap + '/uri：缺少链接');
+  if (a.type === 'mediaControl' && STUDIO_MEDIA_COMMANDS.indexOf(a.command) < 0) errors.push(ap + '/command：音乐控制命令无效');
       if (a.type === 'call' && !a.call) errors.push(ap + '/call：缺少函数名');
       if (a.type === 'for') {
         if (!a.var) errors.push(ap + '/var：for 循环缺少循环变量名');

@@ -87,6 +87,16 @@ sealed class RuleAction {
     /** 打开链接/系统页（uri）。 */
     data class OpenUri(val uri: String) : RuleAction()
 
+    /**
+     * 媒体控制：播放/暂停、上一首、下一首、停止。
+     *
+     * 只做"转发"：真正调 `MediaController.TransportControls` 的是 `NotificationRelay`，
+     * 这样规则层完全不碰 Android 媒体 API，单元测试里可以用假的 [RuleEffects] 验证解析与调用。
+     *
+     * 命令取值见 [MEDIA_COMMANDS]；权限沿用已有的「通知使用权」，不新增权限。
+     */
+    data class MediaControl(val command: String) : RuleAction()
+
     /** 调用另一个函数（宏），参数是"名字 → 字面值"。 */
     data class CallFunction(val name: String, val args: Map<String, String>) : RuleAction()
 
@@ -168,6 +178,9 @@ object TriggerParser {
 
     /** 单次触发里循环迭代总数上限，跨所有循环累计。 */
     const val MAX_LOOP_ITERATIONS = 200
+
+    /** `mediaControl` 允许的命令：与编辑器下拉、文档保持同一份清单。 */
+    val MEDIA_COMMANDS = listOf("playPause", "next", "prev", "stop")
 
     fun parse(root: JSONObject): TriggerModel {
         val vars = parseVars(root.optJSONObject("vars"))
@@ -359,6 +372,16 @@ object TriggerParser {
                 if (uri.isBlank()) throw SceneFormatException("$path/uri", "openUri 必须给链接")
                 RuleAction.OpenUri(uri)
             }
+            "mediaControl" -> {
+                val command = obj.optString("command", obj.optString("media", ""))
+                if (command.isBlank()) {
+                    throw SceneFormatException("$path/command", "mediaControl 必须给命令（${MEDIA_COMMANDS.joinToString(" / ")}）")
+                }
+                if (command !in MEDIA_COMMANDS) {
+                    throw SceneFormatException("$path/command", "未知媒体命令 \"$command\"（支持 ${MEDIA_COMMANDS.joinToString(" / ")}）")
+                }
+                RuleAction.MediaControl(command)
+            }
             "call" -> {
                 val name = obj.optString("call", "")
                 if (name.isBlank()) throw SceneFormatException("$path/call", "call 必须给函数名")
@@ -407,7 +430,7 @@ object TriggerParser {
             else -> throw SceneFormatException(
                 "$path/type",
                 "未知动作类型 \"$type\"（支持 setVar / setVisible / setProperty / playAnimation / " +
-                    "launchApp / openUri / call / for / while）"
+                    "launchApp / openUri / mediaControl / call / for / while）"
             )
         }
     }

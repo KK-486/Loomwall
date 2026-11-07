@@ -18,10 +18,10 @@ object EngineVersion {
     const val CURRENT = "0.3.0"
 
     /** scene.json 结构版本。 */
-    const val SCENE_FORMAT = "0.2"
+    const val SCENE_FORMAT = "0.3"
 
     /** interactions.json 结构版本。 */
-    const val INTERACTIONS_FORMAT = "0.8"
+    const val INTERACTIONS_FORMAT = "0.9"
 
     /**
      * 解析器接受的交互动格式版本。
@@ -34,18 +34,20 @@ object EngineVersion {
      * 0.5 新增 for / while 循环动作（do 数组 + 迭代上限）；
      * 0.6 新增 parallax（倾斜视差）；0.7 新增 width / height 两个可动画属性；
      * 0.8 绑定支持 expr 表达式（可用 audio(i) 等音频函数）。
-     * 旧预设语义完全不变，所以 0.1~0.6 继续接受，没必要逼作者改版本号。
+     * 0.9 新增 mediaControl 动作（媒体播放/暂停/切歌）。
+     * 旧预设语义完全不变，所以旧版本号继续接受，没必要逼作者改版本号。
      */
     val ACCEPTED_INTERACTIONS_FORMATS =
-        setOf("0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", INTERACTIONS_FORMAT)
+        setOf("0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", INTERACTIONS_FORMAT)
 
     /**
      * 解析器接受的 scene 格式版本。
      *
      * 0.2 起允许 `container` 作为 children 出现（<div> 式分组）；
      * 0.1 没有这个能力，但读起来语义完全一致，所以继续接受旧版本号。
+     * 0.3 新增文本 maxLines（按宽度自动折行），缺省 0 = 旧行为。
      */
-    val ACCEPTED_SCENE_FORMATS = setOf("0.1", SCENE_FORMAT)
+    val ACCEPTED_SCENE_FORMATS = setOf("0.1", "0.2", SCENE_FORMAT)
 
     /** 当前预设包（manifest.formatVersion）版本。 */
     const val PACKAGE_FORMAT = "0.2"

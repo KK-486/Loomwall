@@ -74,6 +74,18 @@ class NotificationRelay : NotificationListenerService() {
             Log.i(TAG, "壁纸可见性 → $visible（监听器${if (visibilityListener != null) "已" else "未"}连接）")
             visibilityListener?.invoke(visible)
         }
+
+        /**
+         * 当前连接着的监听器实例。
+         *
+         * 媒体控制需要**活的 MediaController**，只能从实例里拿；监听器没连上
+         * （没授权 / 被系统杀掉）时为 null，此时控制命令直接返回 false，不报错。
+         */
+        @Volatile
+        private var instance: NotificationRelay? = null
+
+        /** 壁纸服务调用：执行一次媒体控制。返回 false 表示当前没有可控的播放器。 */
+        fun mediaCommand(command: String): Boolean = instance?.runCommand(command) ?: false
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -124,6 +136,7 @@ class NotificationRelay : NotificationListenerService() {
     override fun onListenerConnected() {
         Log.i(TAG, "通知监听已连接")
         connected = true
+        instance = this
         // 注册可见性回调：壁纸可见时才开始补播放进度
         visibilityListener = { visible -> onWallpaperVisibilityChanged(visible) }
         refresh()
@@ -132,16 +145,57 @@ class NotificationRelay : NotificationListenerService() {
     override fun onListenerDisconnected() {
         Log.i(TAG, "通知监听已断开")
         connected = false
+        if (instance === this) instance = null
         visibilityListener = null
         teardownControllers()
     }
 
     override fun onDestroy() {
         connected = false
+        if (instance === this) instance = null
         visibilityListener = null
         teardownControllers()
         handler.removeCallbacks(positionTick)
         super.onDestroy()
+    }
+
+    /**
+     * 执行一次媒体控制。
+     *
+     * 选会话的顺序：**正在播放的** → 暂停中的 → 任意一个。
+     * 为什么不是"最近活跃的应用"：桌面上同时挂着网易云和播客时，用户点"暂停"
+     * 想停的显然是正在出声的那个。
+     *
+     * 不检查命令合法性（解析期已经挡过一次），未知命令返回 false 而不是抛异常。
+     */
+    private fun runCommand(command: String): Boolean {
+        val controller = controllers.values.firstOrNull { isPlaying(it) }
+            ?: controllers.values.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PAUSED }
+            ?: controllers.values.firstOrNull()
+            ?: run {
+                Log.d(TAG, "媒体控制跳过：没有活跃会话（$command）")
+                return false
+            }
+        val controls = runCatching { controller.transportControls }.getOrNull() ?: return false
+        val handled = runCatching {
+            when (command) {
+                "playPause" -> {
+                    if (controller.playbackState?.state == PlaybackState.STATE_PLAYING) controls.pause() else controls.play()
+                }
+                "next" -> controls.skipToNext()
+                "prev" -> controls.skipToPrevious()
+                "stop" -> controls.stop()
+                else -> return false
+            }
+            true
+        }.onFailure { Log.w(TAG, "媒体命令失败（$command）：${it.message}") }.getOrDefault(false)
+        if (handled) {
+            Log.i(TAG, "媒体命令已发送：$command → ${controller.packageName}")
+            // 立刻刷新，不等播放器回调（不同播放器回调延迟从 50ms 到 1s 不等）
+            publishMetadata()
+            ExternalVars.bump()
+        }
+        return handled
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {

@@ -271,6 +271,9 @@ object SceneParser {
         val textMaskY = requireNumber(json, "maskY", path, required = false, default = 0.0).toFloat()
         val textMaskW = requireNumber(json, "maskW", path, required = false, default = 100.0).toFloat()
         val textMaskH = requireNumber(json, "maskH", path, required = false, default = 100.0).toFloat()
+        // 0 = 不自动折行（与旧预设行为一致）；上界与 TextWrap.MAX_LINES 对齐
+        val textMaxLines = requireNumber(json, "maxLines", path, required = false, default = 0.0)
+            .toInt().coerceIn(0, TextWrap.MAX_LINES)
 
         return TextNode(
             id = id,
@@ -290,7 +293,8 @@ object SceneParser {
             cornerRadius = textCorner,
             mask = textMask,
             maskSides = textMaskSides,
-            maskSrc = textMaskSrc, maskX = textMaskX, maskY = textMaskY, maskW = textMaskW, maskH = textMaskH
+            maskSrc = textMaskSrc, maskX = textMaskX, maskY = textMaskY, maskW = textMaskW, maskH = textMaskH,
+            maxLines = textMaxLines
         )
     }
 

@@ -283,6 +283,7 @@
             "playAnimation",
             "launchApp",
             "openUri",
+            "mediaControl",
             "call",
             "for",
             "while"
@@ -353,6 +354,10 @@
         "uri": {
           "type": "string",
           "description": "openUri 的链接"
+        },
+        "command": {
+          "enum": ["playPause", "next", "prev", "stop"],
+          "description": "mediaControl 的命令：播放/暂停、下一首、上一首、停止。"
         },
         "from": {
           "type": "string",

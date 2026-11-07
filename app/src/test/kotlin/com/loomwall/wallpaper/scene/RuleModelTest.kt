@@ -154,4 +154,32 @@ class RuleModelTest {
         )
         assertEquals("toggle_menu", m.rules[0].template)
     }
+
+    @Test
+    fun `mediaControl parses with valid command`() {
+        val m = parse(
+            """{"rules":[{"id":"r20","when":{"trigger":"tap","target":"btn_play"},"then":[{"type":"mediaControl","command":"playPause"}]}]}"""
+        )
+        val action = m.rules[0].actions[0]
+        assertTrue(action is RuleAction.MediaControl)
+        assertEquals("playPause", (action as RuleAction.MediaControl).command)
+    }
+
+    @Test
+    fun `mediaControl rejects unknown command`() {
+        val e = kotlin.runCatching {
+            parse("""{"rules":[{"id":"r21","when":{"trigger":"tap"},"then":[{"type":"mediaControl","command":"rewind"}]}]}""")
+        }.exceptionOrNull()
+        assertTrue(e is SceneFormatException)
+        assertTrue(e!!.message!!.contains("rewind"))
+    }
+
+    @Test
+    fun `mediaControl requires command`() {
+        val e = kotlin.runCatching {
+            parse("""{"rules":[{"id":"r22","when":{"trigger":"tap"},"then":[{"type":"mediaControl"}]}]}""")
+        }.exceptionOrNull()
+        assertTrue(e is SceneFormatException)
+        assertTrue(e!!.message!!.contains("command"))
+    }
 }

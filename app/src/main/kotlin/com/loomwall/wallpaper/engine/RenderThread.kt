@@ -31,6 +31,13 @@ internal class RenderThread(
     private val onBindingsChanged: (Boolean) -> Unit = {},
     /** 启动应用 / 打开链接：真正的 startActivity 由服务（有 Context）执行。 */
     private val onLaunch: (com.loomwall.wallpaper.scene.EventAction) -> Unit = {},
+    /**
+     * 媒体控制：规则里的 `mediaControl` 动作转交给它。
+     *
+     * 返回 true 表示确实有活跃播放器被控制；没有播放器时"按了没反应"是正确的，
+     * 渲染线程只记日志，不重试也不提示——桌面上不该弹出任何东西。
+     */
+    private val onMediaCommand: (String) -> Boolean = { false },
     /** 注册传感器需要 Context（只用于取 SensorManager，不持有长生命周期引用以外的东西）。 */
     private val context: android.content.Context
 ) : Thread("LOOW-Render") {
@@ -858,6 +865,7 @@ Log.i(TAG, "规则执行 " + ruleCount + " 条（命中=" + (hitId ?: "(画布)"
                                 is com.loomwall.wallpaper.scene.RuleAction.PlayAnimation -> "play " + a.clipId + (if (a.reverse) "（反向）" else "")
                                 is com.loomwall.wallpaper.scene.RuleAction.LaunchApp -> "launch " + a.packageName
                                 is com.loomwall.wallpaper.scene.RuleAction.OpenUri -> "uri " + a.uri
+                                is com.loomwall.wallpaper.scene.RuleAction.MediaControl -> "media " + a.command
                                 is com.loomwall.wallpaper.scene.RuleAction.CallFunction -> "call " + a.name
                                 is com.loomwall.wallpaper.scene.RuleAction.ForLoop ->
                                     "for " + a.varName + "=" + a.fromExpr + ".." + a.toExpr +
@@ -959,6 +967,13 @@ Log.i(TAG, "规则执行 " + ruleCount + " 条（命中=" + (hitId ?: "(画布)"
                                             com.loomwall.wallpaper.scene.EventAction.OpenUri(uri)
                                         )
                                     }.onFailure { Log.w(TAG, "规则打开链接失败：${it.message}") }
+                                }
+
+                                override fun mediaControl(command: String) {
+                                    val ok = runCatching { onMediaCommand(command) }
+                                        .onFailure { Log.w(TAG, "媒体控制失败（$command）：${it.message}") }
+                                        .getOrDefault(false)
+                                    Log.d(TAG, "媒体控制：$command → ${if (ok) "已发送" else "无活跃播放器"}")
                                 }
 
                                 override fun scheduleRepeat(ruleId: String, times: Int, intervalMs: Int) {

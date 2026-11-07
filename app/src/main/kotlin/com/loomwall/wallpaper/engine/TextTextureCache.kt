@@ -13,6 +13,7 @@ import com.loomwall.wallpaper.scene.TextNode
 import com.loomwall.wallpaper.scene.FeatherBlur
 import com.loomwall.wallpaper.scene.ShapeKind
 import com.loomwall.wallpaper.scene.Shapes
+import com.loomwall.wallpaper.scene.TextWrap
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -97,7 +98,10 @@ internal class TextTextureCache {
             )
         }
 
-        val lines = renderedText.split('\n')
+        // maxLines > 0 时按图层宽度折行（超出加省略号）；= 0 时保持旧行为。
+        // 折行只看框宽，不看框高：高度不够时文字照样会被纹理边界裁掉，
+        // 这是刻意的 —— 让"框太小"表现为可见的裁切，而不是悄悄缩字。
+        val lines = TextWrap.wrap(renderedText, boxWidthPx.toFloat(), node.maxLines) { paint.measureText(it) }
         val lineHeight = fontPx * LINE_HEIGHT
         // 垂直居中：单行时视觉上更稳；多行时整体居中
         val totalHeight = lineHeight * lines.size
@@ -163,7 +167,7 @@ internal class TextTextureCache {
     /** 与 [textureFor] 里计算的签名必须完全一致，否则缓存永远不命中。 */
     private fun signature(node: TextNode, renderedText: String, canvasWidthPx: Int): String =
         "${node.id}|$renderedText|${node.fontSize}|${node.width}|${node.height}|" +
-            "${node.align}|${node.color}|$canvasWidthPx|${node.feather}|${node.cornerRadius}|${node.mask}|${node.maskSides}"
+            "${node.align}|${node.color}|$canvasWidthPx|${node.feather}|${node.cornerRadius}|${node.mask}|${node.maskSides}|${node.maxLines}"
 
     private fun uploadTexture(bitmap: Bitmap): Int {
         val ids = IntArray(1)

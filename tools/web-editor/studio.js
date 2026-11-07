@@ -1112,13 +1112,14 @@ function startStudioLinkDrag(ev, svg, portEl) {
   line.setAttribute('class', 'st-wire-temp');
   line.setAttribute('stroke', portEl.style.background || '#38bdf8');
   svg.appendChild(line);
-  const x1 = pr.left + pr.width / 2 - rect.left;
-  const y1 = pr.top + pr.height / 2 - rect.top;
+  const z = studio.zoom || 1;
+  const x1 = (pr.left + pr.width / 2 - rect.left) / z;
+  const y1 = (pr.top + pr.height / 2 - rect.top) / z;
   const move = e => {
     line.setAttribute('x1', x1);
     line.setAttribute('y1', y1);
-    line.setAttribute('x2', e.clientX - rect.left);
-    line.setAttribute('y2', e.clientY - rect.top);
+    line.setAttribute('x2', (e.clientX - rect.left) / z);
+    line.setAttribute('y2', (e.clientY - rect.top) / z);
   };
   move(ev);
   const up = e => {
@@ -1166,6 +1167,9 @@ function drawStudioWires(svg, els) {
   if (!svg) return;
   while (svg.firstChild) svg.removeChild(svg.firstChild);
   const rect = svg.getBoundingClientRect();
+  // playfield 上有 translate+scale，SVG 的坐标系是缩放前的画布单位，
+  // 而端口 rect 是屏幕像素 → 必须除以 zoom，否则缩放后连线整体错位。
+  const z = studio.zoom || 1;
   const doc = studioDoc();
   doc.edges.forEach(edge => {
     const a = els.get(edge.from);
@@ -1176,10 +1180,10 @@ function drawStudioWires(svg, els) {
     if (!ap || !bp) return;
     const ar = ap.getBoundingClientRect();
     const br = bp.getBoundingClientRect();
-    const x1 = ar.left + ar.width / 2 - rect.left;
-    const y1 = ar.top + ar.height / 2 - rect.top;
-    const x2 = br.left + br.width / 2 - rect.left;
-    const y2 = br.top + br.height / 2 - rect.top;
+    const x1 = (ar.left + ar.width / 2 - rect.left) / z;
+    const y1 = (ar.top + ar.height / 2 - rect.top) / z;
+    const x2 = (br.left + br.width / 2 - rect.left) / z;
+    const y2 = (br.top + br.height / 2 - rect.top) / z;
     const mid = Math.max(34, Math.abs(x2 - x1) * 0.45);
     const d = 'M ' + x1 + ' ' + y1 + ' C ' + (x1 + mid) + ' ' + y1 + ', ' +
       (x2 - mid) + ' ' + y2 + ', ' + x2 + ' ' + y2;

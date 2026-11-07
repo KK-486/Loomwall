@@ -196,6 +196,10 @@ class LwpWallpaperService : WallpaperService() {
                 },
                 onLaunch = { action -> launchFromWallpaper(action) },
                 context = applicationContext,
+                // 媒体控制：复用通知监听器已持有的 MediaController，不需要新权限
+                onMediaCommand = { command ->
+                    com.loomwall.wallpaper.net.NotificationRelay.mediaCommand(command)
+                },
                 onBindingsChanged = { has ->
                     // 回调来自渲染线程，切回主线程再订阅/注销
                     mainHandler.post {

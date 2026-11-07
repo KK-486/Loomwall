@@ -228,7 +228,14 @@ data class TextNode(
     val maskW: Float = 100f,
     val maskH: Float = 100f,
     /** 图片 alpha 蒙版（资源名，空 = 不用）。 */
-    val maskSrc: String = ""
+    val maskSrc: String = "",
+    /**
+     * 自动折行的最大行数。
+     *
+     * `0`（默认）= 只按 `\n` 手动分行，与之前行为完全一致（老预设不受影响）；
+     * `>= 1` = 按图层宽度折行，超出截断并加省略号（规则见 [TextWrap]）。
+     */
+    val maxLines: Int = 0
 ) : SceneNode
 
 data class SceneDocument(
