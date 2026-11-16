@@ -133,7 +133,9 @@ const SHAPES = [
   ['triangle', '三角形'],
   ['trapezoid', '梯形'],
   ['polygon', '正多边形'],
-  ['star', '星形']
+  ['star', '星形'],
+  // 软件容器：引擎侧已支持（虚线框 + 加号，绑定应用后画图标）
+  ['appslot', '软件容器']
 ];
 
 /**
@@ -271,6 +273,15 @@ function insertShape(item) {
     shape: item.kind
   };
   if (item.sides) node.sides = item.sides;
+  if (item.kind === 'appslot') {
+    // 软件容器默认是"白色虚线框 + 白色加号"，不要继承形状默认的蓝色
+    node.borderColor = '#CCFFFFFF';
+    node.plusColor = '#CCFFFFFF';
+    node.borderWidth = 0.38;
+    node.dash = 1.8;
+    node.cornerRadius = 12;
+    node.color = '#CCFFFFFF';
+  }
   if (item.kind === 'ellipse') node.circleLock = item.circleLock === true;
 
   const container = selectedRect();
@@ -1117,12 +1128,82 @@ function fillShapePath(node) {
     fillVectorPath(node);
     return;
   }
+  if (node.shape === 'appslot') {
+    drawAppSlot(node);
+    return;
+  }
   // 蒙版优先；否则自身形状 + 圆角（与引擎端同一套规则）
   const points = effectivePointsOf(node, worldToPx(node.width), worldToPx(node.height));
   ctx.beginPath();
   points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
   ctx.closePath();
   ctx.fill();
+}
+
+/**
+ * 画软件容器（局部坐标系：0,0 到 worldToPx(width/height)）。
+ *
+ * 未绑定 → 虚线框 + 中间加号；已绑定 → 虚线框 + 图标 + 名字。
+ * 和手机端 AppSlotTextureCache 保持同一套比例（图标占宽 76%、名字在下方）。
+ */
+function drawAppSlot(node) {
+  const wPx = Math.max(1, worldToPx(node.width));
+  const hPx = Math.max(1, worldToPx(node.height));
+  // 边框色优先用 borderColor：引擎端就是这么取色的，两边必须一致
+  const c = parseColor(node.borderColor || node.color || '#CCFFFFFF');
+  const unit = wPx / Math.max(0.001, node.width || 1);
+  const bw = Math.max(1.5, (node.borderWidth ?? 0.38) * unit);
+  const dashPx = Math.max(0, (node.dash ?? 1.8) * unit);
+  const radius = Math.min(wPx, hPx) * Math.min(0.5, (node.cornerRadius || 0) / 100 * 2);
+
+  ctx.save();
+
+  const iconKey = node.appIcon || '';
+  const iconSrc = iconKey && state.doc.resources ? state.doc.resources[iconKey] : null;
+  if (iconSrc) {
+    // 已绑定：图标铺满容器，不画虚线框
+    let img = imageCache.get(iconKey);
+    if (!img) {
+      img = new Image();
+      img.onload = () => scheduleDraw();
+      img.src = iconSrc;
+      imageCache.set(iconKey, img);
+    }
+    const pad = Math.min(wPx, hPx) * 0.04;
+    const side = Math.min(wPx, hPx) - pad * 2;
+    const left = (wPx - side) / 2;
+    const top = (hPx - side) / 2;
+    if (img.complete && img.naturalWidth) {
+      ctx.drawImage(img, left, top, side, side);
+    } else {
+      ctx.fillStyle = 'rgba(120,130,150,.35)';
+      ctx.fillRect(left, top, side, side);
+    }
+  } else {
+    // 空容器：虚线框与加号才使用边框色的 alpha
+    ctx.globalAlpha *= c.a;
+    ctx.strokeStyle = `rgb(${Math.round(c.r)},${Math.round(c.g)},${Math.round(c.b)})`;
+    ctx.lineWidth = bw;
+    if (dashPx > 0 && ctx.setLineDash) ctx.setLineDash([dashPx, dashPx * 0.85]);
+    ctx.beginPath();
+    const inset = bw / 2;
+    if (ctx.roundRect) ctx.roundRect(inset, inset, wPx - bw, hPx - bw, radius);
+    else ctx.rect(inset, inset, wPx - bw, hPx - bw);
+    ctx.stroke();
+    if (ctx.setLineDash) ctx.setLineDash([]);
+    const arm = Math.min(wPx, hPx) * 0.16;
+    const thick = Math.max(2.5, Math.min(wPx, hPx) * 0.055);
+    ctx.strokeStyle = `rgb(${Math.round(c.r)},${Math.round(c.g)},${Math.round(c.b)})`;
+    ctx.lineWidth = thick;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(wPx / 2 - arm / 2, hPx / 2);
+    ctx.lineTo(wPx / 2 + arm / 2, hPx / 2);
+    ctx.moveTo(wPx / 2, hPx / 2 - arm / 2);
+    ctx.lineTo(wPx / 2, hPx / 2 + arm / 2);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 /**
@@ -1591,12 +1672,23 @@ function simValueOf(source) {
     case 'sys.time.minute': return Number(sim.minute ?? 0);
     case 'sys.battery.temp': return Number(sim.temp ?? 32);
     case 'sys.notify.count': return Number(sim.notify ?? 3);
+    case 'sys.notify.shown': return Number(sim.notifyShown ?? 2);
+    case 'sys.notify.empty': return Number(sim.notifyEmpty ?? 0);
     // 引擎里的真名是 usedPct；旧名字保留，避免老预设预览突然变 0
     case 'sys.mem.usedPct':
     case 'sys.mem.used': return Number(sim.mem ?? 60);
     case 'sys.storage.usedPct':
     case 'sys.storage.used': return Number(sim.storage ?? 50);
     default: {
+      // 通知流：has 是数值（决定整行显隐），其余字段是文本，交给 PREVIEW_TEXT_VARS。
+      // 不区分的话，文本字段会被当成数值算出 NaN，画布上就会印出 "NaN · NaN"。
+      if (source.startsWith('sys.notify.')) {
+        const m = source.match(/^sys\.notify\.(\d+)\.has$/);
+        if (m) return Number(m[1]) <= 2 ? 1 : 0;
+        if (source === 'sys.notify.shown') return 2;
+        if (source === 'sys.notify.empty') return 0;
+        return Number.NaN;
+      }
       // 其余系统变量（音乐进度、音频频谱等）用统一的预览值表兜底。
       // 之前这里直接 return 0：绑定音频后画布上柱子永远是平的，看起来像"绑定没生效"。
       const v = previewVar(source);
@@ -2108,6 +2200,11 @@ function drawNode(node) {
       const use = target || ctx;
       use.globalAlpha = prevCtx === use ? clamp(opacity, 0, 1) * (gradient ? 1 : c.a) : 1;
       use.fillStyle = gradient || `rgb(${c.r},${c.g},${c.b})`;
+      if (node.shape === 'appslot') {
+        // 统一走 drawAppSlot：只保留一份实现，避免"编辑器两份画法不一致"
+        drawAppSlot(node);
+        return;
+      }
       if (node.shape === 'path') {
         use.save();
         use.scale(wPx / Math.max(1, viewBoxSize(node, 'w')), hPx / Math.max(1, viewBoxSize(node, 'h')));
@@ -2202,6 +2299,24 @@ const PREVIEW_VARS = {
   'sys.storage.freeMb': 11800,
   'sys.render.fps': 60,
   'sys.notify.count': 3,
+  'sys.notify.1.app': '微信',
+  'sys.notify.1.title': '张三',
+  'sys.notify.1.text': '晚上一起吃饭吗？',
+  'sys.notify.1.time': '刚刚',
+  'sys.notify.2.app': '信息',
+  'sys.notify.2.title': '10086',
+  'sys.notify.2.text': '本月流量已使用 8.2GB',
+  'sys.notify.2.time': '12 分',
+  'sys.notify.3.app': '',
+  'sys.notify.3.title': '',
+  'sys.notify.3.text': '',
+  'sys.notify.3.time': '',
+  'sys.notify.4.app': '',
+  'sys.notify.4.title': '',
+  'sys.notify.4.text': '',
+  'sys.notify.4.time': '',
+  'sys.notify.shown': 2,
+  'sys.notify.empty': 0,
   'sys.media.playing': 1,
   'sys.media.position': 48,
   'sys.media.duration': 259,
@@ -2364,7 +2479,15 @@ function evalTemplateExpr(inner) {
   const format = colon >= 0 ? text.slice(colon + 1) : '';
 
   const numerical = previewVar(name);
-  if (numerical !== undefined) return formatTemplateValue(Number(numerical), format);
+  if (numerical !== undefined) {
+    const asNumber = Number(numerical);
+    // 数值变量：按格式输出
+    if (!Number.isNaN(asNumber)) return formatTemplateValue(asNumber, format);
+    // 文本变量（通知流、歌词这类）：previewVar 直接返回字符串，原样输出
+    if (typeof numerical === 'string' && numerical.length) return numerical;
+    // 空字符串也算有效值（通知槽位为空时应该显示空白，而不是留着占位符）
+    if (numerical === '') return '';
+  }
   if (PREVIEW_TEXT_VARS[name] !== undefined) return PREVIEW_TEXT_VARS[name];
 
   // 未知变量：原样保留，方便发现写错的名字
@@ -2621,6 +2744,81 @@ const ENGINE_PROP_TO_UI = {
   x: 'x', y: 'y', scale: 'scale', rotationZ: 'rot', opacity: 'alpha',
   width: 'width', height: 'height'
 };
+
+/**
+ * 把 `interactions.rules`（规则表）迁进工作台节点图。
+ *
+ * 为什么要有这一步：工作台只认 `interactions.studio`。用脚本生成的预设、
+ * 或早期手写的 rules，在编辑器里是"看不见"的 —— 能跑但没法改。
+ * 这里在导入时把它们翻译成节点，之后就和手搭的图一样可编辑、可编译。
+ *
+ * 只在"工作台本来是空的"时候做：已经有节点图的预设不能被反向导入覆盖。
+ */
+function migrateLegacyRules(doc) {
+  if (!doc || !doc.interactions) return null;
+  if (typeof studioFromRules !== 'function') return null;
+  const it = doc.interactions;
+  const rules = Array.isArray(it.rules) ? it.rules : [];
+  if (!rules.length) return null;
+  it.studio = it.studio || { nodes: [], edges: [] };
+  // 「数据绑定」节点是另一条迁移路径加的，不代表用户搭过触发器图 ——
+  // 只看非 bind 的节点，否则带绑定的预设永远导不进来。
+  const existingTriggerNodes = (it.studio.nodes || []).filter(n => n.type !== 'bind').length;
+  if (existingTriggerNodes > 0) return null;   // 已有触发器图，不覆盖
+
+  const imported = studioFromRules(rules, it.vars || {});
+  if (!imported.nodes.length) return imported.skipped && imported.skipped.length ? imported : null;
+
+  // 布局：一条规则 = 一列（触发在上、动作向下串联），每 6 列换行。
+  // 之前是"一列到底"，27 条规则排到 2 万像素高，画布上只看得见左上角。
+  const STRIP_W = 300, NODE_DY = 132, ROW_GAP = 60, PER_ROW = 8;
+  const isSourceNode = (n) => (
+    n.type === 'gesture' || n.type === 'varTrigger' || n.type === 'session' ||
+    n.type === 'minute' || n.type === 'drag'
+  );
+  const strips = [];
+  imported.nodes.forEach((n) => {
+    if (isSourceNode(n) || !strips.length) strips.push([]);
+    strips[strips.length - 1].push(n);
+  });
+  let x = 60, y = 60, rowH = 0;
+  strips.forEach((strip, index) => {
+    if (index > 0 && index % PER_ROW === 0) {
+      x = 60;
+      y += rowH + ROW_GAP;
+      rowH = 0;
+    }
+    strip.forEach((n, k) => {
+      n.x = x;
+      n.y = y + k * NODE_DY;
+    });
+    rowH = Math.max(rowH, strip.length * NODE_DY);
+    x += STRIP_W;
+  });
+
+  // 关键：上一步 migrateLegacyBindings 已经建好了 bind 节点。
+  // 这里如果直接赋值，绑定节点会被整份规则图顶掉 —— 导入任何"带绑定的预设"都会丢绑定。
+  const keepBindNodes = (it.studio.nodes || []).filter(n => n.type === 'bind');
+  const keepBindEdges = (it.studio.edges || []).filter(e =>
+    keepBindNodes.some(n => n.id === e.from) && keepBindNodes.some(n => n.id === e.to));
+  const BIND_COLS = 4, BIND_DY = 190;
+  keepBindNodes.forEach((n, i) => {
+    n.x = 60 + (i % BIND_COLS) * 300;
+    n.y = 60 + Math.floor(i / BIND_COLS) * BIND_DY;
+  });
+  // 规则图整体下移，给绑定节点留出空间
+  const bindShift = keepBindNodes.length
+    ? Math.ceil(keepBindNodes.length / BIND_COLS) * BIND_DY + 40
+    : 0;
+  if (bindShift) imported.nodes.forEach(n => { n.y += bindShift; });
+
+  it.studio.nodes = keepBindNodes.concat(imported.nodes);
+  it.studio.edges = keepBindEdges.concat(imported.edges);
+  it.studioManaged = true;
+  // 规则已经在图里了，rules 交给导出时重新编译，避免"图和表两份真相"
+  it.rules = [];
+  return imported;
+}
 
 function migrateLegacyBindings(doc) {
   if (!doc || !doc.interactions) return 0;
@@ -4356,6 +4554,36 @@ function renderInspector() {
     // 圆角 / 蒙版 / 羽化：与文字图层共用同一套控件（形状、图片都走这里）
     maskFeatherControls(rect, field);
 
+    if ((rect.shape || '') === 'appslot') {
+      // 绑定信息只读：手机端才能列出已安装应用
+      const bound = rect.appPkg
+        ? (rect.appLabel || rect.appPkg) + '（' + rect.appPkg + '）'
+        : '未绑定——在手机上点一下这个框即可选择应用';
+      field('应用', [el('span', 'badge', rect.appPkg ? '已绑定' : '未绑定')]);
+      box.appendChild(el('div', 'hint', bound));
+      field('虚线', [numberField(rect.dash ?? 1.8, v => {
+        rect.dash = Math.max(0, v);
+        renderAll(true);
+        draw();
+      }, '线长')]);
+      field('线宽', [numberField(rect.borderWidth ?? 0.38, v => {
+        rect.borderWidth = Math.max(0, v);
+        renderAll(true);
+        draw();
+      }, '粗细')]);
+      if (rect.appPkg) {
+        const clear = el('button', 'icon-btn', '解除绑定');
+        clear.onclick = () => {
+          delete rect.appPkg;
+          delete rect.appLabel;
+          delete rect.appIcon;
+          renderAll(true);
+          draw();
+          status('已解除绑定（仅当前预设，手机端会按它覆盖）');
+        };
+        field('', [clear]);
+      }
+    }
     if ((rect.shape || '') === 'path') {
       field('描边', [numberField(rect.strokeWidth || 0, v => {
         rect.strokeWidth = Math.max(0, v);
@@ -5152,7 +5380,10 @@ function download(name, text) {
 // ================= 触发器规则校验 =================
 // 引擎在加载时也会校验（带 JSON 路径），但用户不应该等到"发到手机才报错"。
 // 这里做静态检查：目标/变量/函数是否存在、动作类型是否支持、变量是否有环。
-const RULE_ACTION_TYPES = ['setVar', 'setVisible', 'setProperty', 'playAnimation', 'launchApp', 'openUri', 'mediaControl', 'call'];
+const RULE_ACTION_TYPES = ['setVar', 'setVisible', 'setProperty', 'playAnimation', 'launchApp', 'openUri',
+  'mediaControl', 'call',
+  // 0.13 起引擎支持：亮度 / 音量 / 歌词进度 / 系统面板 / 跳设置页
+  'brightness', 'volume', 'seek', 'panel', 'settings'];
 
 function validateRules() {
   const out = [];
@@ -5178,7 +5409,7 @@ function validateRules() {
       out.push(`${where}：监听的变量「${when.var}」未定义`);
     }
     // gesture 是引擎支持的通用手势触发（tap/doubleTap/longPress/swipe*），编辑器早先漏了
-  if (!['tap', 'var', 'minute', 'session', 'gesture'].includes(when.trigger)) {
+  if (!['tap', 'var', 'minute', 'session', 'gesture', 'drag'].includes(when.trigger)) {
       out.push(`${where}：未知触发类型「${when.trigger}」`);
     }
 
@@ -5468,6 +5699,47 @@ function setPhoneState(text, ok) {
   chip.style.color = ok ? '#7ee2a8' : '#ff9f9f';
 }
 
+/**
+ * USB 连接：让本地服务执行 `adb forward`，把电脑端口转到手机的 8765。
+ *
+ * 为什么不在浏览器里直接调 adb：网页没有执行本地程序的权限，
+ * 所以只能由 EXE / 开发服务器代跑（/adb/connect）。
+ */
+async function usbConnect() {
+  const btn = document.getElementById('btn-usb');
+  if (btn) { btn.disabled = true; btn.textContent = '连接中…'; }
+  setPhoneState('正在连接 USB…', true);
+  try {
+    const res = await fetch('/adb/connect?port=18765', { cache: 'no-store' });
+    const data = await res.json().catch(() => null);
+    if (!data) {
+      setPhoneState('USB 需要 EXE 版或开发服务器', false);
+      return null;
+    }
+    if (!data.ok) {
+      setPhoneState('USB：' + (data.error || '失败'), false);
+      return null;
+    }
+    const input = document.getElementById('phone-addr');
+    if (input) input.value = data.base;
+    const info = await pingPhone(data.base);
+    if (info) {
+      state.phoneBase = data.base;
+      try { localStorage.setItem('lwpkit.phoneAddr', data.base); } catch { /* 忽略 */ }
+      setPhoneState('已连接 USB（' + (data.serial || '') + '）', true);
+      status('USB 已连接：' + data.base);
+      return data.base;
+    }
+    setPhoneState('USB 已转发，但手机端没响应', false);
+    return null;
+  } catch (err) {
+    setPhoneState('USB：' + (err && err.message ? err.message : '失败'), false);
+    return null;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'USB 连接'; }
+  }
+}
+
 /** GET /ping 握手；连不上返回 null。 */
 async function pingPhone(base) {
   // 没有 fetch / AbortController 的环境（老浏览器、无头自检）直接当作连不上，不要抛异常
@@ -5606,6 +5878,12 @@ async function sendBundleToPhone() {
 }
 
 function sendToPhone() { savePreset('phone'); }
+
+/** USB 按钮：连上之后「发送到手机」会直接用转发地址。 */
+(() => {
+  const btn = document.getElementById('btn-usb');
+  if (btn) btn.addEventListener('click', () => { usbConnect(); });
+})();
 function exportBundle() { savePreset('file'); }
 
 function export3() {
@@ -5668,12 +5946,28 @@ function importJson(text) {
 
   // 旧文件的 interactions.bindings 要转成「数据绑定」节点，否则面板已隐藏、用户再也看不到
   const migrated = migrateLegacyBindings(state.doc);
+  // 规则表同理：不转成节点，工作台就是空的（能跑但改不了）
+  const ruleImport = migrateLegacyRules(state.doc);
+  // 导入了大量节点：把"适应全部"标记下来，工作台打开（或已经打开）时自动缩放
+  if (ruleImport && ruleImport.nodes.length && typeof studio !== 'undefined') {
+    studio.pendingFit = true;
+    if (studio.open && typeof studioFitToContent === 'function') studioFitToContent();
+  }
 
   ensureClipNames();
   state.sel = { rectId: null, channel: -1, keyIndex: -1 };
   validate();
   renderAll();
-  status(migrated > 0 ? ('已导入，并把 ' + migrated + ' 条旧绑定转成了触发器节点') : '已导入');
+  if (ruleImport && ruleImport.nodes.length) {
+    const skipped = ruleImport.skipped ? ruleImport.skipped.length : 0;
+    status(
+      '已导入：' + (ruleImport.nodes.length) + ' 个节点从规则表还原到工作台' +
+      (skipped ? '（' + skipped + ' 条动作暂不支持，未导入）' : '') +
+      (migrated > 0 ? '；另转换 ' + migrated + ' 条旧绑定' : '')
+    );
+  } else {
+    status(migrated > 0 ? ('已导入，并把 ' + migrated + ' 条旧绑定转成了触发器节点') : '已导入');
+  }
 }
 
 // ---------------------------------------------------------------- 校验
@@ -5775,12 +6069,280 @@ async function copyText(text) {
   }
 }
 
+/**
+ * 「我的变量」：编辑器里定义的自定义变量表。
+ *
+ * 为什么要能在这里编辑：变量是规则的状态载体（菜单展开、软件容器数量…），
+ * 以前只能靠 setVar 节点隐式创建，改初值/范围要手翻 JSON。
+ * `记住`（persist）表示运行期的值写盘，重启后接着用 —— 只该给"用户操作产生的状态"勾，
+ * 界面状态（比如当前打开哪个面板）勾了会导致重启还停在面板里。
+ */
+/**
+ * 通用询问弹窗。返回 Promise<string|null>：确定给输入值（无输入时为 ''），取消给 null。
+ * 打包成 EXE 后 window.prompt 不可用（WebView2 不支持），所以编辑器自带一个。
+ */
+function askDialog(opts) {
+  const modal = document.getElementById('ask-modal');
+  const title = document.getElementById('ask-title');
+  const meta = document.getElementById('ask-meta');
+  const msg = document.getElementById('ask-msg');
+  const input = document.getElementById('ask-input');
+  if (!modal || !title || !msg || !input) return Promise.resolve(null);
+
+  title.textContent = opts.title || '提示';
+  meta.textContent = opts.meta || '';
+  msg.textContent = opts.message || '';
+  msg.style.display = (opts.message ? '' : 'none');
+  input.hidden = !opts.input;
+  input.value = opts.value || '';
+  modal.hidden = false;
+  if (opts.input) setTimeout(() => { input.focus(); input.select(); }, 30);
+
+  return new Promise(resolve => {
+    const done = (value) => {
+      modal.hidden = true;
+      document.getElementById('ask-ok').removeEventListener('click', onOk);
+      document.getElementById('ask-cancel').removeEventListener('click', onCancel);
+      document.getElementById('ask-backdrop').removeEventListener('click', onCancel);
+      document.removeEventListener('keydown', onKey);
+      resolve(value);
+    };
+    const onOk = () => done(opts.input ? input.value.trim() : '');
+    const onCancel = () => done(null);
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+      if (e.key === 'Enter' && opts.input) { e.preventDefault(); onOk(); }
+    };
+    document.getElementById('ask-ok').addEventListener('click', onOk);
+    document.getElementById('ask-cancel').addEventListener('click', onCancel);
+    document.getElementById('ask-backdrop').addEventListener('click', onCancel);
+    document.addEventListener('keydown', onKey);
+  });
+}
+
+/**
+ * 统计某个变量被引用的地方。
+ *
+ * 为什么要查：删掉一个还被规则/绑定/文本用着的变量，那些引用会静默失效
+ * （表达式里读到 0、文本里留 {tab} 字面量），比"删不掉"更难查。
+ *
+ * 扫描范围就是整个文档里除 `interactions.vars` 以外的所有字符串，
+ * 用词边界匹配，避免 tab 命中 table 这类子串。
+ */
+function countVarUsage(name) {
+  const out = { rules: 0, bindings: 0, nodes: 0, texts: 0, total: 0 };
+  if (!name) return out;
+  const re = new RegExp('(^|[^A-Za-z0-9_.])' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^A-Za-z0-9_])');
+  const hit = (s) => typeof s === 'string' && re.test(s);
+
+  const it = state.doc.interactions || {};
+  // 规则表
+  for (const rule of (it.rules || [])) {
+    const blob = JSON.stringify(rule);
+    if (hit(blob)) out.rules += 1;
+  }
+  // 绑定
+  for (const b of (it.bindings || [])) {
+    if (hit(String(b.expr || '')) || hit(String(b.source || ''))) out.bindings += 1;
+  }
+  // 工作台节点（规则与你定义的动作都在这里）
+  const nodes = (it.studio && it.studio.nodes) || [];
+  for (const n of nodes) {
+    const blob = JSON.stringify(n);
+    if (hit(blob)) out.nodes += 1;
+  }
+  // 文本占位符
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'text' && hit(String(node.text || ''))) out.texts += 1;
+    (node.children || []).forEach(walk);
+  };
+  walk(state.doc.scene && state.doc.scene.root);
+
+  out.total = out.rules + out.bindings + out.nodes + out.texts;
+  return out;
+}
+
+/** 变量名合法性：要在表达式/占位符里出现，所以按标识符来。 */
+function isValidVarName(name) {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
+}
+
+function renderMyVars() {
+  renderMyVarsOnly();
+  renderMyFns();
+}
+
+function renderMyVarsOnly() {
+  const host = document.getElementById('var-my');
+  if (!host) return;
+  const it = state.doc.interactions || (state.doc.interactions = {});
+  it.vars = it.vars || {};
+
+  host.innerHTML = '';
+  const head = el('div', 'hint', '我的变量');
+  head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 0 4px';
+  const add = el('button', 'cat-chip', '＋ 新变量');
+  add.title = '新增一个自定义变量';
+  add.onclick = async () => {
+    let n = 1;
+    while (it.vars[('v' + n)] !== undefined) n += 1;
+    const suggested = 'v' + n;
+    const name = await askDialog({
+      title: '新建变量',
+      meta: '名字会用在表达式与 {占位符} 里',
+      message: '只能字母、数字、下划线，且不能以数字开头（例：tab、apps、musicOn）',
+      input: true,
+      value: suggested,
+    });
+    if (name === null) return;
+    const finalName = name || suggested;
+    if (!isValidVarName(finalName)) {
+      status('变量名不合法：' + finalName + '（只能用字母/数字/下划线，且不能以数字开头）');
+      return;
+    }
+    if (it.vars[finalName] !== undefined) {
+      status('变量 ' + finalName + ' 已存在');
+      return;
+    }
+    it.vars[finalName] = { value: 0, min: 0, max: 1 };
+    renderMyVars();
+    status('已新增变量 ' + finalName);
+  };
+  head.appendChild(add);
+  host.appendChild(head);
+
+  const names = Object.keys(it.vars);
+  if (!names.length) {
+    host.appendChild(el('div', 'hint', '还没有自定义变量；规则里的「设变量」会自动补一个'));
+    return;
+  }
+
+  names.forEach((name) => {
+    const raw = it.vars[name];
+    const obj = (raw && typeof raw === 'object') ? raw : { value: Number(raw) || 0, min: 0, max: 1 };
+    it.vars[name] = obj;
+
+    const row = el('div', '');
+    row.style.cssText = 'display:flex;align-items:center;gap:5px;padding:2px 0';
+
+    const label = el('span', '', name);
+    label.style.cssText = 'min-width:62px;font-family:monospace;overflow:hidden;text-overflow:ellipsis';
+
+    const value = document.createElement('input');
+    value.type = 'number';
+    value.value = String(obj.value ?? 0);
+    value.title = '初值';
+    value.style.cssText = 'width:56px';
+    value.onchange = () => {
+      obj.value = Number(value.value) || 0;
+      status('变量 ' + name + ' 初值 = ' + obj.value);
+    };
+
+    const persistWrap = document.createElement('label');
+    persistWrap.style.cssText = 'display:flex;align-items:center;gap:3px;cursor:pointer';
+    persistWrap.title = '记住运行期的值（重启后接着用）。只给用户操作产生的状态勾，界面状态别勾';
+    const persist = document.createElement('input');
+    persist.type = 'checkbox';
+    persist.checked = obj.persist === true;
+    persist.onchange = () => {
+      if (persist.checked) obj.persist = true; else delete obj.persist;
+      status('变量 ' + name + (persist.checked ? ' 会记住到下次启动' : ' 不再记住'));
+    };
+    persistWrap.appendChild(persist);
+    persistWrap.appendChild(document.createTextNode('记住'));
+
+    // 一键把变量插进工作台：变量本身不是节点（它是状态），
+    // 但"定义"和"使用"不该隔着两个面板来回跑，所以这里直接给一个入口。
+    const ins = el('button', 'cat-chip', '＋');
+    ins.title = '在工作台里插入一个读取这个变量的节点';
+    ins.onclick = () => {
+      if (typeof addStudioNode !== 'function' || typeof studioDoc !== 'function') {
+        status('工作台未就绪，无法插入节点');
+        return;
+      }
+      addStudioNode('varChanged');
+      const doc2 = studioDoc();
+      const node = doc2.nodes[doc2.nodes.length - 1];
+      if (node) {
+        node.params.name = name;
+        if (typeof persistDoc === 'function') persistDoc();
+        if (typeof renderStudioCanvas === 'function') renderStudioCanvas();
+      }
+      status('已插入「变量」节点：' + name + '（在工作台里可见）');
+    };
+
+    const del = el('button', 'cat-chip', '×');
+    del.title = '删除这个变量';
+    del.onclick = async () => {
+      const used = countVarUsage(name);
+      if (used.total > 0) {
+        const parts = [];
+        if (used.rules) parts.push('规则 ' + used.rules + ' 条');
+        if (used.nodes) parts.push('工作台节点 ' + used.nodes + ' 个');
+        if (used.bindings) parts.push('绑定 ' + used.bindings + ' 条');
+        if (used.texts) parts.push('文本 ' + used.texts + ' 处');
+        const okDelete = await askDialog({
+          title: '删除变量 ' + name + '？',
+          meta: '仍被引用',
+          message: '它还被 ' + parts.join('、') + ' 使用。删掉后这些引用会读到 0，' +
+            '文本里会留下 {' + name + '} 字面量。确定要删吗？',
+          input: false,
+        });
+        if (okDelete === null) return;
+      }
+      delete it.vars[name];
+      renderMyVars();
+      status('已删除变量 ' + name);
+    };
+
+    row.appendChild(label);
+    row.appendChild(value);
+    row.appendChild(persistWrap);
+    row.appendChild(ins);
+    row.appendChild(del);
+    host.appendChild(row);
+  });
+}
+
+/**
+ * 「我的函数」只读列表。
+ *
+ * 函数目前只能通过导入带 functions 的预设得到（编辑器还没有定义入口），
+ * 所以这里先承担"有哪些函数可被「调用函数」节点用"的回答，避免用户对着空下拉发呆。
+ */
+function renderMyFns() {
+  const host = document.getElementById('fn-my');
+  if (!host) return;
+  host.innerHTML = '';
+  const fns = (state.doc.interactions && state.doc.interactions.functions) || {};
+  const names = Object.keys(fns);
+  // 没有函数就整块不显示：功能暂时下线，留一个空区块只会让人以为哪里坏了
+  if (!names.length) return;
+  const head = el('div', 'hint', '我的函数');
+  head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 0 4px';
+  host.appendChild(head);
+  for (const name of names) {
+    const raw = fns[name] || {};
+    const params = Array.isArray(raw.params) ? raw.params : [];
+    const steps = Array.isArray(raw.steps) ? raw.steps : [];
+    const row = el('div', '');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:2px 0';
+    row.appendChild(el('span', null, name + '(' + params.join(', ') + ')'));
+    const meta = el('span', 'hint', steps.length + ' 步');
+    meta.style.marginLeft = 'auto';
+    row.appendChild(meta);
+    host.appendChild(row);
+  }
+}
+
 function renderPalette() {
   const list = document.getElementById('var-list');
   const cats = document.getElementById('var-cats');
   if (!list || typeof CATALOG === 'undefined') return;
 
   updateInsertTarget();
+  renderMyVars();
 
   const categories = ['all', ...new Set(CATALOG.map(x => x.category))];
   cats.innerHTML = '';
@@ -5965,6 +6527,9 @@ const GESTURES = [
   ['swipeRight', '右滑'],
   ['swipeUp', '上滑'],
   ['swipeDown', '下滑'],
+  ['press', '按下'],
+  ['hold', '按住 5 秒'],
+  ['release', '松手'],
 ];
 
 /**
@@ -6175,7 +6740,11 @@ function renderEvents() {
     box.appendChild(row);
   }
 
-  renderEventList(box);
+  // 事件卡片放进独立子容器：renderEventList 会清空自己的容器，
+  // 如果直接传 box，上面刚加的「点击穿透」复选框会被一起清掉（它就这么消失了很久）。
+  const listBox = el('div', null);
+  box.appendChild(listBox);
+  renderEventList(listBox);
 }
 
 function renderEventList(box) {
@@ -6637,6 +7206,7 @@ document.getElementById('add-menu').onclick = (ev) => {
   if (!kind) return;
   document.getElementById('add-menu').classList.remove('open');
   if (kind === 'shape') openShapePicker();
+  else if (kind === 'appslot') insertShape({ kind: 'appslot', sides: 0, label: '软件容器', w: 44, h: 44 });
   else if (kind === 'container') addContainer();
   else if (kind === 'text') addText();
   else if (kind === 'image') document.getElementById('image-file').click();
@@ -6750,7 +7320,7 @@ window.addEventListener('resize', () => {
 });
 
 // 版本标记：刷新后看一眼这里，就能确认浏览器是不是真的拿到了新脚本。
-const BUILD_TAG = '2026-11-07-v102rel';
+const BUILD_TAG = '2026-11-12-v103appslot';
 (function () {
   const node = document.getElementById('build');
   if (node) node.textContent = 'build ' + BUILD_TAG;

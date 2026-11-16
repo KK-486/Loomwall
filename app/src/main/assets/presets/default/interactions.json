@@ -1,5 +1,5 @@
 {
-  "formatVersion": "0.9",
+  "formatVersion": "0.13",
   "events": [
     {
       "id": "ev_demo_toggle",

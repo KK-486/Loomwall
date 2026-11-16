@@ -77,6 +77,74 @@ object WeatherCode {
         )
     }.getOrNull()
 
+    /** 一天的预报。温度 °C，降水 mm，降水概率 %。 */
+    data class Day(
+        val code: Int,
+        val max: Float,
+        val min: Float,
+        val rain: Float,
+        val precip: Float,
+        val sunrise: String,
+        val sunset: String
+    )
+
+    /**
+     * 解析 Open-Meteo 的 `daily` 段。
+     *
+     * 请求时带 `past_days=1&forecast_days=5`，所以返回 6 天：
+     * [昨天, 今天, 明天, 后天, 大后天, 第 5 天]，取前 5 个就够用。
+     */
+    fun parseDaily(json: String): List<Day>? = runCatching {
+        val daily = JSONObject(json).optJSONObject("daily") ?: return null
+        val time = daily.optJSONArray("time") ?: return null
+        val codes = daily.optJSONArray("weather_code")
+        val maxs = daily.optJSONArray("temperature_2m_max")
+        val mins = daily.optJSONArray("temperature_2m_min")
+        val probs = daily.optJSONArray("precipitation_probability_max")
+        val precips = daily.optJSONArray("precipitation_sum")
+        val sunrises = daily.optJSONArray("sunrise")
+        val sunsets = daily.optJSONArray("sunset")
+        val out = ArrayList<Day>(time.length())
+        for (i in 0 until time.length()) {
+            out.add(
+                Day(
+                    code = codes?.optInt(i, -1) ?: -1,
+                    max = (maxs?.optDouble(i, 0.0) ?: 0.0).toFloat(),
+                    min = (mins?.optDouble(i, 0.0) ?: 0.0).toFloat(),
+                    rain = (probs?.optDouble(i, 0.0) ?: 0.0).toFloat(),
+                    precip = (precips?.optDouble(i, 0.0) ?: 0.0).toFloat(),
+                    sunrise = shortTime(sunrises?.optString(i, "") ?: ""),
+                    sunset = shortTime(sunsets?.optString(i, "") ?: "")
+                )
+            )
+        }
+        out
+    }.getOrNull()
+
+    /** "2026-11-11T06:39" → "06:39" */
+    private fun shortTime(iso: String): String {
+        val t = iso.indexOf('T')
+        if (t < 0 || iso.length < t + 6) return ""
+        return iso.substring(t + 1, t + 6)
+    }
+
+    /** 未来几小时的最大降水概率与累计降水。 */
+    data class RainNow(val maxProb: Float, val sumMm: Float)
+
+    fun parseHourly(json: String, hours: Int = 6): RainNow? = runCatching {
+        val hourly = JSONObject(json).optJSONObject("hourly") ?: return null
+        val probs = hourly.optJSONArray("precipitation_probability") ?: return null
+        val precips = hourly.optJSONArray("precipitation")
+        var maxProb = 0f
+        var sumMm = 0f
+        val n = minOf(hours, probs.length())
+        for (i in 0 until n) {
+            maxProb = maxOf(maxProb, probs.optDouble(i, 0.0).toFloat())
+            sumMm += (precips?.optDouble(i, 0.0) ?: 0.0).toFloat()
+        }
+        RainNow(maxProb, sumMm)
+    }.getOrNull()
+
     /** 地理编码的一条命中：名称、坐标，以及接口给的行政区名（可能为空）。 */
     data class GeoHit(
         val name: String,

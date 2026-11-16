@@ -157,4 +157,28 @@ class ExprTest {
         assertEquals(null, e)
         assertEquals(0f, num("order"), 0.001f)
     }
+
+    /**
+     * 翻页用的表达式：`page = (page + 1) % 3`、位置 `-100 * page`。
+     *
+     * 为什么值得单测：壁纸翻页全靠这两条表达式，一旦取模或括号解析失败，
+     * 求值会静默变成 0 —— 表现是"划了没反应"或"永远停在第一页"，非常难查。
+     */
+    @Test
+    fun `modulo drives page cycling`() {
+        fun evalWithPage(src: String, page: Float): Float = ExprParser.evaluate(
+            ExprParser.parse(src),
+            ExprContext(numberVar = { if (it == "page") page else null })
+        ).asNumber()
+
+        assertEquals(1f, evalWithPage("(page + 1) % 3", 0f), 0.001f)
+        assertEquals(2f, evalWithPage("(page + 1) % 3", 1f), 0.001f)
+        assertEquals(0f, evalWithPage("(page + 1) % 3", 2f), 0.001f)
+
+        assertEquals(2f, evalWithPage("(page + 2) % 3", 0f), 0.001f)
+        assertEquals(0f, evalWithPage("(page + 2) % 3", 1f), 0.001f)
+        assertEquals(1f, evalWithPage("(page + 2) % 3", 2f), 0.001f)
+
+        assertEquals(-200f, evalWithPage("-100 * page", 2f), 0.001f)
+    }
 }

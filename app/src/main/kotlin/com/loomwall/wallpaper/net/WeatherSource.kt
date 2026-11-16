@@ -133,6 +133,18 @@ object WeatherSource {
         ExternalVars.weatherText = ""
         ExternalVars.weatherCity = ""
         ExternalVars.weatherDistrict = ""
+        for (i in 0 until ExternalVars.weatherDayMax.size) {
+            ExternalVars.weatherDayMax[i] = 0f
+            ExternalVars.weatherDayMin[i] = 0f
+            ExternalVars.weatherDayCode[i] = -1
+            ExternalVars.weatherDayRain[i] = 0f
+            ExternalVars.weatherDayPrecip[i] = 0f
+            ExternalVars.weatherDayText[i] = ""
+        }
+        ExternalVars.weatherRainSoon = 0f
+        ExternalVars.weatherRainMm = 0f
+        ExternalVars.weatherSunrise = ""
+        ExternalVars.weatherSunset = ""
         lastFetchMs = 0L
         lastPlace = ""
         appContext?.let { ctx -> runCatching { File(ctx.filesDir, CACHE_FILE).delete() } }
@@ -169,8 +181,13 @@ object WeatherSource {
             return
         }
 
-        val stale = System.currentTimeMillis() - lastFetchMs > REFRESH_INTERVAL_MS
-        if (stale) fetch(force = false)
+        // 预报数据缺失（老缓存、或升级后第一次启动）时也按"过期"处理：
+        // 否则缓存里的当前天气还在，30 分钟内都不会重新抓，面板上多日预报会一直是 0。
+        val forecastMissing = ExternalVars.weatherDayMax.all { it == 0f }
+        val stale = System.currentTimeMillis() - lastFetchMs > REFRESH_INTERVAL_MS || forecastMissing
+        // 注意：预报缺失时必须 force=true —— fetch(force=false) 内部还有一道 30 分钟间隔检查，
+        // 否则"缓存里当前天气是新的、预报为空"这个状态会一直卡住不刷新。
+        if (stale) fetch(force = forecastMissing)
         scheduleNext()
     }
 
@@ -209,10 +226,16 @@ object WeatherSource {
             Log.w(TAG, "拿不到位置：没有定位权限且没设置城市（可在 App 抽屉里设置天气城市）")
             return
         }
+        // 一次请求拿三组数据：当前 / 多日预报（含昨天）/ 未来 6 小时降水
         val url = "https://api.open-meteo.com/v1/forecast" +
             "?latitude=${"%.4f".format(place.lat)}&longitude=${"%.4f".format(place.lon)}" +
             "&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day," +
-            "precipitation,weather_code,wind_speed_10m&timezone=auto"
+            "precipitation,weather_code,wind_speed_10m" +
+            "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum," +
+            "precipitation_probability_max,sunrise,sunset" +
+            "&past_days=1&forecast_days=5" +
+            "&hourly=precipitation_probability,precipitation&forecast_hours=6" +
+            "&timezone=auto"
 
         val body = httpGet(url) ?: run {
             Log.w(TAG, "天气接口没有返回内容（网络不可用？）")
@@ -221,6 +244,40 @@ object WeatherSource {
         val current = WeatherCode.parseCurrent(body) ?: run {
             Log.w(TAG, "天气 JSON 解析失败（接口字段变了？）")
             return
+        }
+
+        // 多日预报：接口按 [昨天, 今天, 明天, 后天, 大后天, ...] 返回，取前 5 天
+        val days = WeatherCode.parseDaily(body)
+        if (days != null) {
+            for (i in 0 until ExternalVars.weatherDayMax.size) {
+                val d = days.getOrNull(i)
+                if (d == null) {
+                    ExternalVars.weatherDayMax[i] = 0f
+                    ExternalVars.weatherDayMin[i] = 0f
+                    ExternalVars.weatherDayCode[i] = -1
+                    ExternalVars.weatherDayRain[i] = 0f
+                    ExternalVars.weatherDayPrecip[i] = 0f
+                    ExternalVars.weatherDayText[i] = ""
+                } else {
+                    ExternalVars.weatherDayMax[i] = d.max
+                    ExternalVars.weatherDayMin[i] = d.min
+                    ExternalVars.weatherDayCode[i] = d.code
+                    ExternalVars.weatherDayRain[i] = d.rain
+                    ExternalVars.weatherDayPrecip[i] = d.precip
+                    ExternalVars.weatherDayText[i] = WeatherCode.describe(d.code)
+                }
+            }
+            // 今天（索引 1）的日出日落
+            val today = days.getOrNull(1)
+            ExternalVars.weatherSunrise = today?.sunrise ?: ""
+            ExternalVars.weatherSunset = today?.sunset ?: ""
+        }
+
+        // 未来 6 小时降水：用于"降雨提醒"
+        val rain = WeatherCode.parseHourly(body, 6)
+        if (rain != null) {
+            ExternalVars.weatherRainSoon = rain.maxProb
+            ExternalVars.weatherRainMm = rain.sumMm
         }
 
         lastPlace = place.city
@@ -411,6 +468,25 @@ object WeatherSource {
                 put("precip", ExternalVars.weatherPrecip.toDouble())
                 put("isDay", ExternalVars.weatherIsDay.toDouble())
                 put("text", ExternalVars.weatherText)
+                // 多日预报也要存：否则进程重启后"当前天气"是旧的、而预报全是 0
+                put("rainSoon", ExternalVars.weatherRainSoon.toDouble())
+                put("rainMm", ExternalVars.weatherRainMm.toDouble())
+                put("sunrise", ExternalVars.weatherSunrise)
+                put("sunset", ExternalVars.weatherSunset)
+                val days = org.json.JSONArray()
+                for (i in 0 until ExternalVars.weatherDayMax.size) {
+                    days.put(
+                        JSONObject().apply {
+                            put("max", ExternalVars.weatherDayMax[i].toDouble())
+                            put("min", ExternalVars.weatherDayMin[i].toDouble())
+                            put("code", ExternalVars.weatherDayCode[i])
+                            put("rain", ExternalVars.weatherDayRain[i].toDouble())
+                            put("precip", ExternalVars.weatherDayPrecip[i].toDouble())
+                            put("text", ExternalVars.weatherDayText[i])
+                        }
+                    )
+                }
+                put("days", days)
             }
             File(ctx.filesDir, CACHE_FILE).writeText(obj.toString())
         }.onFailure { Log.w(TAG, "缓存写入失败：${it.message}") }
@@ -435,6 +511,22 @@ object WeatherSource {
             ExternalVars.weatherText = obj.optString("text", "")
             ExternalVars.weatherCity = obj.optString("city", lastPlace)
             ExternalVars.weatherDistrict = obj.optString("district", "")
+            ExternalVars.weatherRainSoon = obj.optDouble("rainSoon", 0.0).toFloat()
+            ExternalVars.weatherRainMm = obj.optDouble("rainMm", 0.0).toFloat()
+            ExternalVars.weatherSunrise = obj.optString("sunrise", "")
+            ExternalVars.weatherSunset = obj.optString("sunset", "")
+            val days = obj.optJSONArray("days")
+            if (days != null) {
+                for (i in 0 until ExternalVars.weatherDayMax.size) {
+                    val d = days.optJSONObject(i) ?: continue
+                    ExternalVars.weatherDayMax[i] = d.optDouble("max", 0.0).toFloat()
+                    ExternalVars.weatherDayMin[i] = d.optDouble("min", 0.0).toFloat()
+                    ExternalVars.weatherDayCode[i] = d.optInt("code", -1)
+                    ExternalVars.weatherDayRain[i] = d.optDouble("rain", 0.0).toFloat()
+                    ExternalVars.weatherDayPrecip[i] = d.optDouble("precip", 0.0).toFloat()
+                    ExternalVars.weatherDayText[i] = d.optString("text", "")
+                }
+            }
         }.onFailure { Log.w(TAG, "缓存读取失败：${it.message}") }
     }
 }

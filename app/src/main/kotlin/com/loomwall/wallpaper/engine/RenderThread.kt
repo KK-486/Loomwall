@@ -38,9 +38,46 @@ internal class RenderThread(
      * 渲染线程只记日志，不重试也不提示——桌面上不该弹出任何东西。
      */
     private val onMediaCommand: (String) -> Boolean = { false },
+    private val onMediaSeek: (Float) -> Boolean = { false },
+    /**
+     * 软件容器（未绑定）被点击：交给服务打开"选择应用"界面。
+     * 参数是容器的节点 id。
+     */
+    private val onAppSlotPick: (String) -> Unit = {},
+    /** 软件容器（已绑定）被长按：交给服务弹出「切换软件 / 取消绑定」。 */
+    private val onAppSlotOptions: (String) -> Unit = {},
     /** 注册传感器需要 Context（只用于取 SensorManager，不持有长生命周期引用以外的东西）。 */
     private val context: android.content.Context
 ) : Thread("LOOW-Render") {
+
+    /**
+     * 变量持久化（presets/active/var-state.json）。
+     * 懒创建：预设里没有 persist 变量时不产生任何文件与线程。
+     */
+    private var varStore: VarFileStore? = null
+
+    private fun varPersistence(): VarPersistence {
+        // 状态不能再放在 presets/active 里：应用/重载预设时那个目录会被整目录删除重建，
+        // 于是"记住"的值每次重载都被清空。改成按预设 id 存在固定目录下。
+        val dir = java.io.File(context.filesDir, "var-state")
+        val id = runCatching {
+            java.io.File(context.filesDir, "presets/active.id").readText().trim()
+        }.getOrNull()?.takeIf { it.isNotEmpty() } ?: "active"
+        val fileName = id.replace(Regex("[^A-Za-z0-9._-]"), "_") + ".json"
+        val store = VarFileStore(dir, fileName)
+        // 一次性迁移旧位置的数据（老版本写在 active/var-state.json）
+        val legacy = java.io.File(context.filesDir, "presets/active/var-state.json")
+        val target = java.io.File(dir, fileName)
+        if (!target.isFile && legacy.isFile) {
+            runCatching {
+                dir.mkdirs()
+                legacy.copyTo(target, overwrite = true)
+                Log.i(TAG, "已迁移旧变量状态：" + legacy.name + " → " + target.name)
+            }
+        }
+        varStore = store
+        return store
+    }
 
     private enum class Decision { DRAW, SUSPEND, QUIT }
 
@@ -59,6 +96,22 @@ internal class RenderThread(
     private var reloadRequested = false
     private var pendingTapX = -1f
     private var pendingTapY = -1f
+
+    // ---- 滑条（拖拽）状态：全部由渲染线程消费，写入侧只碰 lock ----
+    private var dragActive = false
+    private var dragDownX = -1f
+    private var dragDownY = -1f
+    private var dragX = -1f
+    private var dragY = -1f
+    private var dragTargetId: String? = null
+    private var dragLastPercent = -1f
+    private var dragAxis = "x"
+
+    // 亮度/音量下发的节流状态（渲染线程独占；拖拽收尾会清时间戳强制补一帧）
+    private var lastBrightApplied = -1f
+    private var lastBrightAt = 0L
+    private var lastVolumeApplied = -1f
+    private var lastVolumeAt = 0L
 
     // ---- 仅渲染线程访问 ----
     private val egl = EglCore()
@@ -251,8 +304,10 @@ internal class RenderThread(
             visible = isVisible
             if (isVisible) {
                 needsRender = true
-                // 编辑器保存后用户会回桌面：重新可见时重读预设，省掉进程间通信。
-                reloadRequested = true
+                // 注意：这里**不能**置 reloadRequested。
+                // 每次回到桌面都重解析预设，会把运行时状态（面板开合、滑条/变量）
+                // 一起冲回初始值 —— 用户实测"从 A 面板切到别的应用再回来就变回 A 之前"。
+                // 预设切换有 ACTION_RELOAD 广播兜底（PresetLibrary.apply / 导入服务都会发）。
             }
             lock.notifyAll()
         }
@@ -269,6 +324,8 @@ internal class RenderThread(
             TiltSource.attach(context) { requestRenderForTilt() }
         } else {
             TiltSource.detach()
+            // 延迟显隐只在可见期有意义：不可见就丢弃，避免下次回到桌面突然隐藏面板
+            synchronized(lock) { ruleRuntime?.clearDelayed() }
         }
         Log.i(TAG, "可见性变化：visible=$isVisible")
     }
@@ -296,6 +353,38 @@ internal class RenderThread(
     }
 
     /** 壁纸收到点击：只记录坐标，命中测试与播放放到 GL 线程做（不碰场景数据）。 */
+    /** 手指按下：记录起点，等渲染线程判断落在哪个可拖区。 */
+    fun onDragStart(xPx: Float, yPx: Float) {
+        synchronized(lock) {
+            dragActive = true
+            dragDownX = xPx
+            dragDownY = yPx
+            dragX = xPx
+            dragY = yPx
+            dragTargetId = null
+            dragLastPercent = -1f
+        }
+    }
+
+    /** 手指移动：只更新坐标 + 请求一帧，换算交给渲染线程（要读 egl.width）。 */
+    fun onDrag(xPx: Float, yPx: Float) {
+        synchronized(lock) {
+            if (!dragActive) return
+            dragX = xPx
+            dragY = yPx
+            needsRender = true
+            lock.notifyAll()
+        }
+    }
+
+    fun onDragEnd() {
+        synchronized(lock) {
+            dragActive = false
+            dragTargetId = null
+            dragLastPercent = -1f
+        }
+    }
+
     fun onTapSurface(xPx: Float, yPx: Float) {
         synchronized(lock) {
             pendingTapX = xPx
@@ -306,6 +395,9 @@ internal class RenderThread(
     }
 
     fun quit() {
+        // 先把没落盘的变量补上，再停掉写线程（线程退出前只做一次）
+        runCatching { varStore?.close() }
+        varStore = null
         synchronized(lock) {
             quit = true
             lock.notifyAll()
@@ -345,15 +437,22 @@ internal class RenderThread(
             // 循环任务到点也要醒来：与整分钟唤醒取更早的那个
             val minuteTimeout = minuteWakeTimeoutLocked()
             val repeatDelay = nextRepeatDelay(SystemClock.uptimeMillis())
+            // 延迟显隐也要到点醒来：渲染循环是按需绘制的，否则"关闭后恢复 rail"这类
+            // 延迟动作可能永远等不到下一帧（真机上表现为"按钮再也不回来"）
+            val delayedDelay = ruleRuntime?.nextDelayedDelay(System.currentTimeMillis()) ?: Long.MAX_VALUE
             val timeout = when {
-                repeatDelay == Long.MAX_VALUE -> minuteTimeout
-                minuteTimeout == 0L -> repeatDelay.coerceAtMost(600_000L)
-                else -> minOf(minuteTimeout, repeatDelay.coerceAtMost(600_000L))
+                repeatDelay == Long.MAX_VALUE && delayedDelay == Long.MAX_VALUE -> minuteTimeout
+                minuteTimeout == 0L -> minOf(repeatDelay, delayedDelay).coerceAtMost(600_000L)
+                else -> minOf(minuteTimeout, minOf(repeatDelay, delayedDelay).coerceAtMost(600_000L))
             }
             if (timeout > 0) {
                 lock.wait(timeout)
                 // 超时醒来后如果跨过了整分钟，请求一帧交给 handleMinuteTick
                 if (!quit && minuteChangedSinceLastTick()) needsRender = true
+                // 延迟显隐到点也请求一帧，交给 drawFrame 里的 pumpDelayed
+                if (!quit && ruleRuntime?.hasDueDelayed(System.currentTimeMillis()) == true) {
+                    needsRender = true
+                }
             } else {
                 lock.wait()
             }
@@ -401,6 +500,14 @@ internal class RenderThread(
     // ---- 绘制 ----
 
     private fun drawFrame(): Boolean {
+        // 延迟显隐（面板退场动画播完再隐藏）在这里推进：只有真正在画帧时才走，
+        // 不额外引入定时器，符合"不可见零唤醒"
+        ruleRuntime?.let { rt ->
+            if (rt.hasDelayedWork()) {
+                rt.pumpDelayed()
+                synchronized(lock) { needsRender = true }
+            }
+        }
         val surface = synchronized(lock) { pendingSurface } ?: return false
         try {
             if (!egl.isInitialized) {
@@ -445,6 +552,7 @@ internal class RenderThread(
 
             ensureSceneLoaded()
             handlePendingTap()
+            handlePendingDrag()
             handlePendingGestures()
             handleMinuteTick()
             // 补间推进：放在取 nowMs 之前一拍，用同一时间基准推进本帧
@@ -465,10 +573,18 @@ internal class RenderThread(
                 d
             }
             val audioBands = AudioLevelSource.tick(audioDt)
-            // 有采集时给这一帧打一份带频谱值的变量表；没有采集就复用快照，不产生分配
-            val varsNow = if (audioBands != null) {
+            // 用户变量（规则里的 vars）：文本模板 {count}、绑定表达式、表达式求值都要能读到。
+            // 之前只用了系统快照，导致预设里写 {count} 会原样印出「{count}」——教学示例就是这么暴露的。
+            val userVars = ruleRuntime?.varSnapshot() ?: emptyMap()
+            val needMerge = audioBands != null || userVars.isNotEmpty()
+            // 有采集或用户变量时才打一份合并表；两者都没有就复用快照，不产生分配
+            val varsNow = if (needMerge) {
                 val merged = HashMap(VarsSnapshot.get())
-                for (i in 0 until 8) merged["sys.audio.b" + (i + 1)] = audioBands[i]
+                for (i in 0 until 8) {
+                    if (audioBands != null) merged["sys.audio.b" + (i + 1)] = audioBands[i]
+                }
+                // 用户变量最后写入：同名时以壁纸自己的变量为准
+                if (userVars.isNotEmpty()) merged.putAll(userVars)
                 merged
             } else {
                 VarsSnapshot.get()
@@ -531,7 +647,9 @@ internal class RenderThread(
             synchronized(lock) {
                 // 动画还在跑、或视差还没跟上目标值，就继续请求下一帧；
                 // 都收敛后立即停止绘制，这是功耗红线的落地。
-                needsRender = runtime?.isAnimating() == true || tiltSettling ||
+                // 用"或"而不是赋值：本帧内（点击/规则/延迟显隐）可能已经请求了下一帧，
+                // 直接赋值会把它清掉，表现就是"点了没反应，下一次点才一次性生效"。
+                needsRender = needsRender || runtime?.isAnimating() == true || tiltSettling ||
                     AudioLevelSource.isSettling
             }
             return true
@@ -598,6 +716,27 @@ internal class RenderThread(
         for ((gesture, x, y) in batch) {
             val hitId = hitNodeId(x, y)
             Log.d(TAG, "手势 $gesture 命中=$hitId 事件数=${events.size}")
+            // 软件容器优先：点空容器=选应用，点已绑定容器=启动应用，长按=切换/取消
+            val slot = hitId?.let { findAppSlot(it) }
+            if (slot != null) {
+                when {
+                    gesture == Gesture.TAP && slot.appPkg.isBlank() -> {
+                        Log.i(TAG, "软件容器 ${slot.id} 未绑定，打开选择器")
+                        runCatching { onAppSlotPick(slot.id) }
+                            .onFailure { Log.w(TAG, "打开应用选择器失败：${it.message}") }
+                    }
+                    gesture == Gesture.TAP -> {
+                        Log.i(TAG, "软件容器 ${slot.id} 启动 ${slot.appPkg}")
+                        runCatching { onLaunch(com.loomwall.wallpaper.scene.EventAction.LaunchApp(slot.appPkg)) }
+                            .onFailure { Log.w(TAG, "启动失败：${it.message}") }
+                    }
+                    gesture == Gesture.LONG_PRESS -> {
+                        Log.i(TAG, "软件容器 ${slot.id} 长按，打开选项")
+                        runCatching { onAppSlotOptions(slot.id) }
+                            .onFailure { Log.w(TAG, "打开选项失败：${it.message}") }
+                    }
+                }
+            }
             for (event in events) {
                 if (event.gesture != gesture) continue
                 if (event.targetId != null && event.targetId != hitId) continue
@@ -646,6 +785,101 @@ Log.i(TAG, "规则执行 " + ruleCount + " 条（命中=" + (hitId ?: "(画布)"
      * 像素坐标 → 命中的元素 id。
      * 与 handlePendingTap 用同一套换算：画布单位 = 像素 / 表面宽度 * 100。
      */
+    /** 按 id 找软件容器节点（找不到或不是 appslot 返回 null）。 */
+    private fun findAppSlot(id: String): com.loomwall.wallpaper.scene.RectNode? {
+        val root = scene?.root ?: return null
+        fun walk(node: com.loomwall.wallpaper.scene.SceneNode): com.loomwall.wallpaper.scene.RectNode? {
+            if (node is com.loomwall.wallpaper.scene.RectNode &&
+                node.shape == com.loomwall.wallpaper.scene.ShapeKind.APPSLOT &&
+                node.id == id
+            ) {
+                return node
+            }
+            if (node is com.loomwall.wallpaper.scene.ContainerNode) {
+                for (child in node.children) {
+                    val found = walk(child)
+                    if (found != null) return found
+                }
+            }
+            return null
+        }
+        return walk(root)
+    }
+
+    /**
+     * 每帧处理一次拖拽。
+     *
+     * 只做三件事：① 首次按下时确定拖动区（用 hitNodeId，尊重穿透与嵌套）；
+     * ② 把当前 X 换算成该矩形内的 0..1；③ 百分比变化超过 0.5 才跑规则（否则每像素都跑，白耗）。
+     */
+    private fun handlePendingDrag() {
+        val (active, downX, downY, curX) = synchronized(lock) {
+            @Suppress("UNCHECKED_CAST")
+            listOf(dragActive, dragDownX, dragDownY, dragX) as List<Any>
+        }
+        if (active as Boolean == false) {
+            // 抬手：节流可能吞掉最后一帧，这里强制补一刀，保证落到手指松开的位置
+            val target = dragTargetId
+            val lastPercent = dragLastPercent
+            if (target != null && lastPercent >= 0f) {
+                lastBrightAt = 0L
+                lastVolumeAt = 0L
+                ruleRuntime?.onDrag(target, (lastPercent / 100f).coerceIn(0f, 1f))
+                synchronized(lock) { needsRender = true }
+            }
+            dragTargetId = null
+            dragLastPercent = -1f
+            return
+        }
+        val width = egl.width
+        if (width <= 0) return
+
+        if (dragTargetId == null) {
+            dragTargetId = hitNodeId(downX as Float, downY as Float) ?: return
+            // 记住这个拖动区是横还是纵（规则里配了 axis:y 就是竖滑条）
+            dragAxis = ruleRuntime?.dragAxisOf(dragTargetId ?: "") ?: "x"
+            dragLastPercent = -1f
+        }
+        val targetId = dragTargetId ?: return
+        val bounds = rectBoundsOf(targetId) ?: return
+        val vertical = dragAxis == "y"
+        val canvasPos = (if (vertical) (synchronized(lock) { dragY }) else (curX as Float)) / width * 100f
+        // 纵滑条：手指在下 → 0%，在上 → 100%（所以用 1 - 比例）
+        val fraction = if (vertical) {
+            (1f - (canvasPos - bounds[1]) / bounds[3]).coerceIn(0f, 1f)
+        } else {
+            ((canvasPos - bounds[0]) / bounds[2]).coerceIn(0f, 1f)
+        }
+        val percent = fraction * 100f
+        if (dragLastPercent >= 0f && kotlin.math.abs(percent - dragLastPercent) < 0.5f) return
+        dragLastPercent = percent
+
+        val handled = ruleRuntime?.onDrag(targetId, fraction) ?: 0
+        if (handled > 0) {
+            synchronized(lock) { needsRender = true }
+        }
+    }
+
+    /** 取元素在画布里的矩形（只支持顶层 rect：滑条都是顶层画的）。返回 [x, y, w, h]。 */
+    private fun rectBoundsOf(id: String): FloatArray? {
+        val doc = scene ?: return null
+        var found: FloatArray? = null
+        fun walk(node: com.loomwall.wallpaper.scene.SceneNode) {
+            if (found != null) return
+            if (node.id == id) {
+                if (node is com.loomwall.wallpaper.scene.RectNode) {
+                    found = floatArrayOf(node.x, node.y, node.width, node.height)
+                }
+                return
+            }
+            if (node is com.loomwall.wallpaper.scene.ContainerNode) {
+                node.children.forEach { walk(it) }
+            }
+        }
+        walk(doc.root)
+        return found
+    }
+
     private fun hitNodeId(xPx: Float, yPx: Float): String? {
         val doc = scene ?: return null
         val surfaceWidth = egl.width
@@ -692,6 +926,23 @@ Log.i(TAG, "规则执行 " + ruleCount + " 条（命中=" + (hitId ?: "(画布)"
     private fun hasMinuteRules(): Boolean =
         ruleRuntime?.let { rt -> synchronized(lock) { rt } } != null && minuteRuleCount() > 0
 
+    /**
+     * 整棵场景树里是否存在 `{sys.*}` 文本占位符。
+     *
+     * 必须递归：文字通常放在 container 里（多页面分组、卡片面板），
+     * 只扫 root.children 会漏掉它们 —— 现场表现就是电量/天气一直显示 "--"，
+     * 但时间（走另一条路径）看起来正常，很容易被误判成"变量没数据"。
+     */
+    private fun rootHasTemplateText(node: com.loomwall.wallpaper.scene.SceneNode): Boolean {
+        if (node is com.loomwall.wallpaper.scene.TextNode) {
+            return node.text.contains("{sys.")
+        }
+        if (node is com.loomwall.wallpaper.scene.ContainerNode) {
+            return node.children.any { rootHasTemplateText(it) }
+        }
+        return false
+    }
+
     private fun minuteRuleCount(): Int = minuteRuleCountCache
 
     private var minuteRuleCountCache = 0
@@ -705,37 +956,26 @@ Log.i(TAG, "规则执行 " + ruleCount + " 条（命中=" + (hitId ?: "(画布)"
             pendingTapY = -1f
         }
 
-        val doc = scene ?: return
         val animations = runtime ?: return
-        val surfaceWidth = egl.width
-        if (surfaceWidth <= 0) return
+        if (egl.width <= 0) return
 
-        // 画布单位是「宽度的百分比」，所以 x、y 都用宽度做分母。
-        val canvasX = xPx / surfaceWidth * 100f
-        val canvasY = yPx / surfaceWidth * 100f
-
-        val hit = doc.root.children
-            .filterIsInstance<RectNode>()
-            .asReversed()
-            .firstOrNull { rect ->
-                rect.visible &&
-                    canvasX >= rect.x && canvasX <= rect.x + rect.width &&
-                    canvasY >= rect.y && canvasY <= rect.y + rect.height
-            }
-
-        if (hit == null) {
-            Log.i(TAG, "点击未命中元素（画布坐标 $canvasX, $canvasY）")
+        // 命中判定必须走渲染器：它知道容器嵌套后的累计变换，也尊重 hitThrough。
+        // 旧实现只扫 doc.root.children 里的矩形，于是"最后加进去的全屏装饰矩形"
+        // 会把所有点击吃掉——示例壁纸里的 flash 层就是这么让 +1 按钮完全没反应的。
+        val hitId = hitNodeId(xPx, yPx)
+        if (hitId == null) {
+            Log.i(TAG, "点击未命中元素（px $xPx, $yPx）")
             return
         }
 
         val nowMs = SystemClock.uptimeMillis()
-        val started = animations.onTap(hit.id, nowMs)
+        val started = animations.onTap(hitId, nowMs)
         // 规则先跑：它可能改变后续动画的目标可见性
-        val ruleCount = ruleRuntime?.onTap(hit.id) ?: 0
-        if (ruleCount > 0) {
+        val ruleCount = ruleRuntime?.onTap(hitId) ?: 0
+        if (ruleCount > 0 || started) {
             synchronized(lock) { needsRender = true }
         }
-        Log.i(TAG, "点击命中 ${hit.id}，触发动画=$started，规则=$ruleCount")
+        Log.i(TAG, "点击命中 $hitId，触发动画=$started，规则=$ruleCount")
     }
 
     /**
@@ -855,6 +1095,7 @@ Log.i(TAG, "规则执行 " + ruleCount + " 条（命中=" + (hitId ?: "(画布)"
                             is com.loomwall.wallpaper.scene.RuleTrigger.VarChanged -> "var " + trg.varName
                             is com.loomwall.wallpaper.scene.RuleTrigger.Minute -> "minute " + (rule.condition ?: "")
                             is com.loomwall.wallpaper.scene.RuleTrigger.Session -> "session"
+                            is com.loomwall.wallpaper.scene.RuleTrigger.Drag -> "drag " + trg.targetId + " → " + trg.varName
                         }
                         val actions = rule.actions.joinToString(", ") { a ->
                             when (a) {
@@ -867,6 +1108,11 @@ Log.i(TAG, "规则执行 " + ruleCount + " 条（命中=" + (hitId ?: "(画布)"
                                 is com.loomwall.wallpaper.scene.RuleAction.OpenUri -> "uri " + a.uri
                                 is com.loomwall.wallpaper.scene.RuleAction.MediaControl -> "media " + a.command
                                 is com.loomwall.wallpaper.scene.RuleAction.CallFunction -> "call " + a.name
+                                is com.loomwall.wallpaper.scene.RuleAction.SetBrightness -> "brightness " + a.expr
+                                is com.loomwall.wallpaper.scene.RuleAction.SetVolume -> "volume " + a.expr
+                                is com.loomwall.wallpaper.scene.RuleAction.MediaSeek -> "seek " + a.expr
+                                is com.loomwall.wallpaper.scene.RuleAction.OpenPanel -> "panel " + a.panel
+                                is com.loomwall.wallpaper.scene.RuleAction.OpenSettings -> "settings " + a.page
                                 is com.loomwall.wallpaper.scene.RuleAction.ForLoop ->
                                     "for " + a.varName + "=" + a.fromExpr + ".." + a.toExpr +
                                         "（体 " + a.body.size + " 个动作）"
@@ -961,7 +1207,94 @@ Log.i(TAG, "规则执行 " + ruleCount + " 条（命中=" + (hitId ?: "(画布)"
                                     }.onFailure { Log.w(TAG, "规则启动应用失败：${it.message}") }
                                 }
 
-                                override fun openUri(uri: String) {
+                                // 拖动时每像素都写系统会卡（跨进程 IPC），这里做 40ms / 1% 节流
+
+        override fun setBrightness(percent: Float) {
+        if (!android.provider.Settings.System.canWrite(context)) {
+            Log.w(TAG, "调亮度被拒：没有「修改系统设置」权限")
+            return
+        }
+        val now = android.os.SystemClock.uptimeMillis()
+        // 只按时间窗节流：快速拖动时"变化大就写"会让每一帧都发 IPC，正是卡顿的来源。
+        // 抬手时会再补一次最终值（见 handlePendingDrag），所以不会丢最后一帧。
+        if (lastBrightApplied >= 0f && now - lastBrightAt < 40) return
+        lastBrightApplied = percent
+        lastBrightAt = now
+        runCatching {
+            val value = (percent.coerceIn(0f, 100f) / 100f * 255f).toInt().coerceIn(1, 255)
+            android.provider.Settings.System.putInt(
+                context.contentResolver,
+                android.provider.Settings.System.SCREEN_BRIGHTNESS,
+                value
+            )
+            // 只补这一个键 + 立刻请求一帧：拖动时不再触发全量 publish（那才是数字延迟的元凶）
+            com.loomwall.wallpaper.engine.VarsSnapshot.patch(
+                com.loomwall.wallpaper.scene.SystemVars.BRIGHTNESS, value / 255f * 100f
+            )
+            synchronized(lock) { needsRender = true; lock.notifyAll() }
+        }.onFailure { Log.w(TAG, "调亮度失败：${it.message}") }
+    }
+
+    override fun setVolume(percent: Float) {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (lastVolumeApplied >= 0f && now - lastVolumeAt < 40) return
+        lastVolumeApplied = percent
+        lastVolumeAt = now
+        runCatching {
+            val am = context.getSystemService(android.content.Context.AUDIO_SERVICE)
+                as? android.media.AudioManager ?: return
+            val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            val index = (percent.coerceIn(0f, 100f) / 100f * max).toInt().coerceIn(0, max)
+            am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, index, 0)
+            com.loomwall.wallpaper.engine.VarsSnapshot.patch(
+                com.loomwall.wallpaper.scene.SystemVars.VOLUME, index * 100f / max
+            )
+            synchronized(lock) { needsRender = true; lock.notifyAll() }
+        }.onFailure { Log.w(TAG, "调音量失败：${it.message}") }
+    }
+
+    override fun openSystemPanel(panel: String) {
+        // 只能"打开面板"：Android 10+ 普通应用无权直接开关 WiFi/蓝牙/飞行/热点
+        val action = when (panel.lowercase()) {
+            "wifi" -> android.provider.Settings.Panel.ACTION_WIFI
+            "internet" -> android.provider.Settings.Panel.ACTION_INTERNET_CONNECTIVITY
+            "bluetooth" -> android.provider.Settings.Panel.ACTION_INTERNET_CONNECTIVITY
+            // 没有飞行模式的服务面板（Panel 只有 WiFi/联网/音量），退化成设置页
+            "airplane" -> "android.settings.AIRPLANE_MODE_SETTINGS"
+            "hotspot", "tethering" -> android.provider.Settings.Panel.ACTION_INTERNET_CONNECTIVITY
+            else -> "android.settings.WIFI_SETTINGS"
+        }
+        launchSystem(action, null)
+    }
+
+    override fun openSystemSettings(page: String) {
+        val action = when (page.lowercase()) {
+            "wifi" -> "android.settings.WIFI_SETTINGS"
+            "bluetooth" -> "android.settings.BLUETOOTH_SETTINGS"
+            "airplane" -> "android.settings.AIRPLANE_MODE_SETTINGS"
+            "hotspot", "tethering" -> "android.settings.TETHER_SETTINGS"
+            "display", "brightness" -> "android.settings.DISPLAY_SETTINGS"
+            "sound", "volume" -> "android.settings.SOUND_SETTINGS"
+            else -> "android.settings.SETTINGS"
+        }
+        launchSystem(action, null)
+    }
+
+    /** 起一个系统界面：壁纸服务里必须 NEW_TASK，且放到主线程避免 ANR。 */
+    private fun launchSystem(action: String, data: android.net.Uri?) {
+        val ctx = context
+        val ui = android.os.Handler(android.os.Looper.getMainLooper())
+        ui.post {
+            runCatching {
+                val intent = android.content.Intent(action)
+                if (data != null) intent.data = data
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                ctx.startActivity(intent)
+            }.onFailure { Log.w(TAG, "打开系统界面失败（$action）：${it.message}") }
+        }
+    }
+
+    override fun openUri(uri: String) {
                                     runCatching {
                                         onLaunch(
                                             com.loomwall.wallpaper.scene.EventAction.OpenUri(uri)
@@ -976,7 +1309,14 @@ Log.i(TAG, "规则执行 " + ruleCount + " 条（命中=" + (hitId ?: "(画布)"
                                     Log.d(TAG, "媒体控制：$command → ${if (ok) "已发送" else "无活跃播放器"}")
                                 }
 
-                                override fun scheduleRepeat(ruleId: String, times: Int, intervalMs: Int) {
+                                override fun mediaSeek(percent: Float) {
+        val ok2 = runCatching { onMediaSeek(percent) }
+            .onFailure { Log.w(TAG, "跳转播放位置失败：${it.message}") }
+            .getOrDefault(false)
+        Log.d(TAG, "跳转播放位置：${percent.toInt()}% → ${if (ok2) "已发送" else "无活跃播放器"}")
+    }
+
+    override fun scheduleRepeat(ruleId: String, times: Int, intervalMs: Int) {
                                     if (ruleId.isBlank()) return
                                     val interval = intervalMs.coerceIn(16, 600_000)
                                     // 同一条规则只保留一个循环任务，重复触发时重置
@@ -1001,16 +1341,21 @@ Log.i(TAG, "规则执行 " + ruleCount + " 条（命中=" + (hitId ?: "(画布)"
                                 // 系统变量由 SystemInputHub 快照提供；未知返回 null
                                 VarsSnapshot.get()[name]
                             },
-                            textVar = { name -> VarsSnapshot.getTexts()[name] }
-                        )
+                            textVar = { name -> VarsSnapshot.getTexts()[name] },
+                            persistence = varPersistence()
+                        ).also { rt ->
+                            // 持久化恢复出来的变量要补跑一次规则，否则界面停在预设初值
+                            rt.applyRestoredState()
+                        }
                     }
                     debugTilt = readDebugTilt(resourcesDirProvider())
                     TiltSource.setFilter(parallaxSettings.smoothing, parallaxSettings.deadzone)
                 // 没有绑定也没有文本占位符的预设，不应该产生任何系统广播订阅（功耗红线）。
                 // 文本里出现 {sys.*} 就需要时间/电量变量，因此同样要订阅。
-                val hasTemplateText = result.preset.scene.root.children
-                    .filterIsInstance<com.loomwall.wallpaper.scene.TextNode>()
-                    .any { it.text.contains("{sys.") }
+                //
+                // 注意必须**递归整棵树**：文字通常放在 container 里（页面分组、卡片），
+                // 只看 root.children 会漏掉它们 —— 表现就是 {sys.battery.level} 一直显示 "--"。
+                val hasTemplateText = rootHasTemplateText(result.preset.scene.root)
                 runCatching { onBindingsChanged(bindings.isNotEmpty() || hasTemplateText) }
                 val loaded = AnimationRuntime(result.preset.interactions)
                 runtime = if (loaded.hasClips) loaded else null

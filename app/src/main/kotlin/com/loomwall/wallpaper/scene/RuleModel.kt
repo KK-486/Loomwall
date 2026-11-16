@@ -21,7 +21,14 @@ data class RuleVar(
     val name: String,
     val value: Float = 0f,
     val min: Float = 0f,
-    val max: Float = 1f
+    val max: Float = 1f,
+    /**
+     * 是否把运行期的值写盘（`presets/active/var-state.json`），下次启动接着用。
+     *
+     * 只给"用户交互产生的状态"用（比如软件容器展开了几个格子）；
+     * 像 `tab` 这种每次启动都该复位的界面状态不要开，否则重新进桌面会停在某个面板里。
+     */
+    val persist: Boolean = false
 )
 
 /** 触发源。密封类：新增来源只加分支，不改已有结构。 */
@@ -35,6 +42,19 @@ sealed class RuleTrigger {
      * [targetId] 为空表示整块画布都能触发。
      */
     data class Gesture(val kind: String, val targetId: String?) : RuleTrigger()
+
+    /**
+     * 拖拽触发：手指在 [targetId] 上横向拖动。
+     *
+     * 拖拽过程中把 [0,100] 的百分比写进变量 [varName] 再执行本规则的动作，
+     * 这样"滑条"只需要一条规则：drag → brightness(变量)。
+     */
+    data class Drag(
+        val targetId: String,
+        val varName: String,
+        /** "x"（默认，横向滑条）或 "y"（纵向滑条，上=100 下=0）。 */
+        val axis: String = "x"
+    ) : RuleTrigger()
 
     data class VarChanged(val varName: String) : RuleTrigger()
 
@@ -50,8 +70,19 @@ sealed class RuleAction {
     /** 设定变量：优先用 [expr]（表达式），否则用 [value]。 */
     data class SetVar(val varName: String, val expr: String?, val value: Float) : RuleAction()
 
-    /** 显示/隐藏：优先用 [expr]（真值），否则用 [value]。 */
-    data class SetVisible(val targetId: String, val expr: String?, val value: Boolean) : RuleAction()
+    /**
+     * 显示/隐藏：优先用 [expr]（真值），否则用 [value]。
+     *
+     * [delayMs] > 0 时延迟执行。用途：关闭面板时先播完"缩小 + 淡出"的退场动画，
+     * 再真正隐藏 —— 立刻隐藏的话动画根本看不见。
+     * 延迟任务只在壁纸可见期间推进（渲染线程每帧泵一次），不可见时整体清空。
+     */
+    data class SetVisible(
+        val targetId: String,
+        val expr: String?,
+        val value: Boolean,
+        val delayMs: Int = 0
+    ) : RuleAction()
 
     /** 设置属性：表达式求值后写入。 */
     /**
@@ -96,6 +127,21 @@ sealed class RuleAction {
      * 命令取值见 [MEDIA_COMMANDS]；权限沿用已有的「通知使用权」，不新增权限。
      */
     data class MediaControl(val command: String) : RuleAction()
+
+    /** 设置屏幕亮度（0..100，需「修改系统设置」权限）。 */
+    data class SetBrightness(val expr: String) : RuleAction()
+
+    /** 设置媒体音量（0..100）。 */
+    data class SetVolume(val expr: String) : RuleAction()
+
+    /** 跳转播放位置（0~100 百分比）。 */
+    data class MediaSeek(val expr: String) : RuleAction()
+
+    /** 打开系统快捷面板：wifi / bluetooth / airplane / hotspot。 */
+    data class OpenPanel(val panel: String) : RuleAction()
+
+    /** 跳转到系统设置详情页：wifi / bluetooth / airplane / hotspot / display / sound。 */
+    data class OpenSettings(val page: String) : RuleAction()
 
     /** 调用另一个函数（宏），参数是"名字 → 字面值"。 */
     data class CallFunction(val name: String, val args: Map<String, String>) : RuleAction()
@@ -200,7 +246,8 @@ object TriggerParser {
                     name = name,
                     value = raw.optDouble("value", 0.0).toFloat(),
                     min = raw.optDouble("min", 0.0).toFloat(),
-                    max = raw.optDouble("max", 1.0).toFloat()
+                    max = raw.optDouble("max", 1.0).toFloat(),
+                    persist = raw.optBoolean("persist", false)
                 )
                 is Number -> RuleVar(name = name, value = raw.toFloat())
                 else -> throw SceneFormatException(path, "变量必须是数字或 {value,min,max} 对象")
@@ -281,6 +328,16 @@ object TriggerParser {
                 }
                 RuleTrigger.Gesture(kind, triggerJson.optString("target", "").ifBlank { null })
             }
+            "drag" -> {
+                val target = triggerJson.optString("target", "")
+                if (target.isBlank()) throw SceneFormatException("$path/target", "drag 触发必须给拖动区元素")
+                // 变量名默认从元素名派生，省一次手填；预设里也可以显式指定
+                val varName = triggerJson.optString("var", "").ifBlank { "drag_" + target }
+                val axis = triggerJson.optString("axis", "x").lowercase().let {
+                    if (it == "y") "y" else "x"
+                }
+                RuleTrigger.Drag(target, varName, axis)
+            }
             "var" -> {
                 val name = triggerJson.optString("var", "")
                 if (name.isBlank()) throw SceneFormatException("$path/var", "var 触发必须给变量名")
@@ -332,7 +389,8 @@ object TriggerParser {
                 RuleAction.SetVisible(
                     targetId = target,
                     expr = obj.optString("expr", "").ifBlank { null },
-                    value = obj.optBoolean("value", true)
+                    value = obj.optBoolean("value", true),
+                    delayMs = obj.optInt("delayMs", 0).coerceIn(0, 10000)
                 )
             }
             "setProperty" -> {
@@ -361,6 +419,36 @@ object TriggerParser {
                 val clip = obj.optString("clip", obj.optString("target", ""))
                 if (clip.isBlank()) throw SceneFormatException("$path/clip", "playAnimation 必须给动画 id")
                 RuleAction.PlayAnimation(clip, obj.optBoolean("reverse", false))
+            }
+            "brightness" -> {
+                val expr = obj.optString("expr", "").ifBlank {
+                    obj.opt("value")?.toString() ?: "0"
+                }
+                RuleAction.SetBrightness(expr)
+            }
+            "volume" -> {
+                val expr = obj.optString("expr", "").ifBlank {
+                    obj.opt("value")?.toString() ?: "0"
+                }
+                RuleAction.SetVolume(expr)
+            }
+            "seek" -> {
+                val expr = obj.optString("expr", "").ifBlank {
+                    obj.opt("value")?.toString() ?: "0"
+                }
+                RuleAction.MediaSeek(expr)
+            }
+            "panel" -> {
+                val kind = obj.optString("panel", "").ifBlank {
+                    throw SceneFormatException("$path/panel", "panel 必须给 wifi/bluetooth/airplane/hotspot")
+                }
+                RuleAction.OpenPanel(kind)
+            }
+            "settings" -> {
+                val page = obj.optString("page", "").ifBlank {
+                    throw SceneFormatException("$path/page", "settings 必须给 wifi/bluetooth/airplane/hotspot/display/sound")
+                }
+                RuleAction.OpenSettings(page)
             }
             "launchApp" -> {
                 val pkg = obj.optString("package", obj.optString("target", ""))

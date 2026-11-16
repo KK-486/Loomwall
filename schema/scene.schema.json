@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.invalid/lwpkit/schema/scene-0.2.json",
+  "$id": "https://example.invalid/lwpkit/schema/scene-0.3.json",
   "title": "LWPKit scene.json",
-  "description": "LWPKit 场景图格式 v0.2（接受 0.1）。坐标单位是画布宽度的百分比：x ∈ [0,100]，y 从顶部向下增长，画布高度单位为 100 * 屏幕高 / 屏幕宽。",
+  "description": "LWPKit 场景图格式 v0.3（接受 0.1 / 0.2）。坐标单位是画布宽度的百分比：x ∈ [0,100]，y 从顶部向下增长，画布高度单位为 100 * 屏幕高 / 屏幕宽。",
   "type": "object",
   "required": ["formatVersion", "root"],
   "properties": {
     "formatVersion": {
-      "description": "场景格式版本。0.2 起允许 container 作为子节点（<div> 式分组）；引擎同时接受 0.1。",
-      "enum": ["0.1", "0.2"]
+      "description": "场景格式版本。0.2 起允许 container 作为子节点（<div> 式分组）；0.3 起 text 支持 maxLines 自动折行、path 支持 strokeWidth 描边。引擎同时接受 0.1 / 0.2。",
+      "enum": ["0.1", "0.2", "0.3"]
     },
     "root": {
       "$ref": "#/$defs/container"
@@ -130,7 +130,7 @@
         },
         "shape": {
           "description": "形状类型，缺省 rect。所有形状都在自身包围盒内绘制。",
-          "enum": ["rect", "ellipse", "triangle", "trapezoid", "polygon", "star", "path"],
+          "enum": ["rect", "ellipse", "triangle", "trapezoid", "polygon", "star", "path", "appslot"],
           "default": "rect"
         },
         "path": {
@@ -158,6 +158,43 @@
           "type": "number",
           "minimum": 0,
           "default": 0
+        },
+        "appPkg": {
+          "description": "shape 为 appslot 时绑定的应用包名。空 = 未绑定，显示虚线框 + 加号。",
+          "type": "string",
+          "default": ""
+        },
+        "appLabel": {
+          "description": "shape 为 appslot 时显示的应用名（存快照，渲染期不查 PackageManager）。",
+          "type": "string",
+          "default": ""
+        },
+        "appIcon": {
+          "description": "shape 为 appslot 时图标资源名（resources 目录下的 PNG）。",
+          "type": "string",
+          "default": ""
+        },
+        "borderColor": {
+          "description": "shape 为 appslot 时虚线框颜色，#RRGGBB 或 #AARRGGBB。",
+          "type": "string",
+          "default": "#CCFFFFFF"
+        },
+        "borderWidth": {
+          "description": "shape 为 appslot 时虚线框线宽（画布单位）。",
+          "type": "number",
+          "minimum": 0,
+          "default": 0.38
+        },
+        "dash": {
+          "description": "shape 为 appslot 时虚线长度（画布单位）；0 = 实线。",
+          "type": "number",
+          "minimum": 0,
+          "default": 1.8
+        },
+        "plusColor": {
+          "description": "shape 为 appslot 且未绑定应用时，中间加号的颜色。",
+          "type": "string",
+          "default": "#CCFFFFFF"
         },
         "viewBox": {
           "description": "SVG 的 viewBox，用于把路径归一化到元素包围盒；缺省 0 0 24 24。",

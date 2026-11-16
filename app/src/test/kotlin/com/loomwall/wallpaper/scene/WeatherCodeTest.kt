@@ -81,4 +81,57 @@ class WeatherCodeTest {
         assertNull(WeatherCode.parseGeocode("""{"generationtime_ms":0.1}"""))
         assertNull(WeatherCode.parseGeocode("""{"results":[]}"""))
     }
+
+    /**
+     * 多日预报解析：接口返回 6 天（昨天 + 今天 + 未来 4 天），
+     * 温度/降水/日出日落都要对上号，不能错位。
+     */
+    @Test
+    fun `解析多日预报`() {
+        val json = """
+            {"daily":{
+              "time":["2026-11-10","2026-11-11","2026-11-12","2026-11-13","2026-11-14","2026-11-15"],
+              "weather_code":[3,3,3,82,63,1],
+              "temperature_2m_max":[20.1,22.2,25.7,24.9,27.4,27.6],
+              "temperature_2m_min":[12.1,12.5,13.5,17.7,17.8,17.4],
+              "precipitation_sum":[0,0,0,42.5,4,0],
+              "precipitation_probability_max":[0,0,0,90,89,41],
+              "sunrise":["2026-11-10T06:38","2026-11-11T06:39","2026-11-12T06:40",
+                          "2026-11-13T06:40","2026-11-14T06:41","2026-11-15T06:41"],
+              "sunset":["2026-11-10T17:44","2026-11-11T17:43","2026-11-12T17:43",
+                          "2026-11-13T17:43","2026-11-14T17:42","2026-11-15T17:42"]
+            }}
+        """.trimIndent()
+        val days = WeatherCode.parseDaily(json)!!
+        assertEquals(6, days.size)
+        // 索引 1 = 今天
+        assertEquals(22.2f, days[1].max, 0.01f)
+        assertEquals(12.5f, days[1].min, 0.01f)
+        assertEquals("06:39", days[1].sunrise)
+        assertEquals("17:43", days[1].sunset)
+        // 索引 3 = 后天：90% 降雨、42.5mm
+        assertEquals(90f, days[3].rain, 0.01f)
+        assertEquals(42.5f, days[3].precip, 0.01f)
+        assertEquals("强阵雨", WeatherCode.describe(days[3].code))
+    }
+
+    @Test
+    fun `多日预报缺字段时返回 null 而不是崩`() {
+        assertNull(WeatherCode.parseDaily("""{"current":{}}"""))
+        assertNull(WeatherCode.parseDaily("不是 JSON"))
+    }
+
+    /** 未来 6 小时降水：取最大概率与累计降水，用于"降雨提醒"。 */
+    @Test
+    fun `解析未来降水`() {
+        val json = """
+            {"hourly":{"time":["2026-11-11T04:00","2026-11-11T05:00","2026-11-11T06:00"],
+                       "precipitation_probability":[10,75,30],
+                       "precipitation":[0.0,2.4,0.6]}}
+        """.trimIndent()
+        val rain = WeatherCode.parseHourly(json, 6)!!
+        assertEquals(75f, rain.maxProb, 0.01f)
+        assertEquals(3.0f, rain.sumMm, 0.01f)
+        assertNull(WeatherCode.parseHourly("""{"daily":{}}"""))
+    }
 }

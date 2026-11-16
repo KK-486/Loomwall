@@ -17,11 +17,17 @@ object EngineVersion {
     /** 当前引擎版本，用于和预设的 engineMinVersion 比较。 */
     const val CURRENT = "0.3.0"
 
-    /** scene.json 结构版本。 */
-    const val SCENE_FORMAT = "0.3"
+    /**
+     * scene.json 结构版本。
+     *
+     * 0.4：新增 `shape: "appslot"`（软件容器）及其字段
+     * （appPkg / appLabel / appIcon / borderColor / borderWidth / dash / plusColor）。
+     * 都是可选字段，旧预设读起来语义不变。
+     */
+    const val SCENE_FORMAT = "0.4"
 
     /** interactions.json 结构版本。 */
-    const val INTERACTIONS_FORMAT = "0.9"
+    const val INTERACTIONS_FORMAT = "0.13"
 
     /**
      * 解析器接受的交互动格式版本。
@@ -38,16 +44,17 @@ object EngineVersion {
      * 旧预设语义完全不变，所以旧版本号继续接受，没必要逼作者改版本号。
      */
     val ACCEPTED_INTERACTIONS_FORMATS =
-        setOf("0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", INTERACTIONS_FORMAT)
+        setOf("0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "0.10", "0.11", "0.12", INTERACTIONS_FORMAT)
 
     /**
      * 解析器接受的 scene 格式版本。
      *
      * 0.2 起允许 `container` 作为 children 出现（<div> 式分组）；
      * 0.1 没有这个能力，但读起来语义完全一致，所以继续接受旧版本号。
-     * 0.3 新增文本 maxLines（按宽度自动折行），缺省 0 = 旧行为。
+     * 0.3 新增文本 maxLines（按宽度自动折行），缺省 0 = 旧行为；
+     * 0.4 新增 appslot 形状（软件容器）。
      */
-    val ACCEPTED_SCENE_FORMATS = setOf("0.1", "0.2", SCENE_FORMAT)
+    val ACCEPTED_SCENE_FORMATS = setOf("0.1", "0.2", "0.3", SCENE_FORMAT)
 
     /** 当前预设包（manifest.formatVersion）版本。 */
     const val PACKAGE_FORMAT = "0.2"

@@ -9,13 +9,21 @@
   ],
   "properties": {
     "formatVersion": {
+      "description": "交互动格式版本。0.8 起支持绑定表达式（expr），0.9 起支持 mediaControl 动作，0.10 起变量可标 persist 持久化到 var-state.json，0.11 起 setVisible 支持 delayMs 延迟执行。引擎同时接受 0.1~0.11。",
       "enum": [
         "0.1",
         "0.2",
         "0.3",
         "0.4",
         "0.5",
-        "0.6"
+        "0.6",
+        "0.7",
+        "0.8",
+        "0.9",
+        "0.10",
+        "0.11",
+        "0.12",
+        "0.13"
       ]
     },
     "animations": {
@@ -25,7 +33,7 @@
       }
     },
     "vars": {
-      "description": "变量表：名字 → 数字或 {value,min,max}。规则用它承载状态（如菜单是否展开）。",
+      "description": "变量表：名字 → 数字或 {value,min,max,persist}。规则用它承载状态（如菜单是否展开、软件容器展开几个）。",
       "type": "object",
       "additionalProperties": {
         "oneOf": [
@@ -46,6 +54,11 @@
               "max": {
                 "type": "number",
                 "default": 1
+              },
+              "persist": {
+                "type": "boolean",
+                "default": false,
+                "description": "是否把运行期的值写入 presets/active/var-state.json，下次启动接着用。只给用户交互产生的状态用（如软件容器展开数量）；界面状态（如 tab）不要开，否则重启会停在面板里。"
               }
             },
             "additionalProperties": false
@@ -238,18 +251,42 @@
             "trigger": {
               "enum": [
                 "tap",
+                "gesture",
                 "var",
                 "minute",
-                "session"
+                "session",
+                "drag"
               ]
             },
+            "gesture": {
+              "description": "gesture 触发的手势类型，和 TriggerParser 保持一致。缺省 expr 时按该手势直接命中。",
+              "enum": [
+                "tap",
+                "doubleTap",
+                "longPress",
+                "swipeLeft",
+                "swipeRight",
+                "swipeUp",
+                "swipeDown",
+                  "press",
+                  "hold",
+                  "release"
+                ]
+            },
             "target": {
-              "description": "tap 的目标元素 id；缺省 = 整块画布。",
+              "description": "tap / gesture 的目标元素 id；缺省 = 整块画布。",
               "type": "string"
             },
             "var": {
-              "description": "var 触发监听的变量名。",
+              "description": "var 触发监听的变量名；drag 触发则是写入拖动百分比的变量名。",
               "type": "string"
+            },
+            "axis": {
+              "description": "drag 触发的拖动方向：x（横向滑条，默认）或 y（纵向滑条，上=100 下=0）。",
+              "enum": [
+                "x",
+                "y"
+              ]
             },
             "expr": {
               "description": "附加条件表达式（布尔），空 = 恒真。",
@@ -286,7 +323,12 @@
             "mediaControl",
             "call",
             "for",
-            "while"
+            "while",
+            "brightness",
+            "volume",
+            "panel",
+            "settings",
+            "seek"
           ]
         },
         "var": {
@@ -318,6 +360,24 @@
         },
         "clip": {
           "type": "string"
+        },
+        "reverse": {
+          "description": "playAnimation 的播放方向：true = 从尾帧倒回（「收起」不需要另做一条动画）。",
+          "type": "boolean",
+          "default": false
+        },
+        "duration": {
+          "description": "setProperty 的补间时长（毫秒）；0 = 瞬移。注意字段名是 duration，不是 durationMs。",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000,
+          "default": 0
+        },
+        "easing": {
+          "description": "setProperty 补间的缓动名（linear / easeIn / easeOut / easeInOut 等）。",
+          "type": "string",
+          "maxLength": 24,
+          "default": "easeOut"
         },
         "call": {
           "type": "string"

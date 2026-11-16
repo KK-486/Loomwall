@@ -202,7 +202,17 @@ function studioActionOf(node, ctx) {
     case 'setVis': {
       const target = studioLayerOf(node, 'layer');
       if (!target) { ctx.warnings.push('「显隐」没有目标图层，已跳过'); return null; }
-      return { type: 'setVisible', target, value: p.value !== 'false' };
+      // 引擎的 setVisible 支持 expr（条件显隐）。工作台以前只会写死 true/false，
+      // 于是"tab == 0 才显示"这类规则反向导入后会被压成"永远显示"。
+      // 现在：值不是布尔字面量就当表达式交给引擎。
+      const raw = String(p.value == null ? 'true' : p.value).trim();
+      // 延迟隐藏（交互动 0.11）：面板退场动画播完再消失
+      const delay = Number(p.delay) || 0;
+      const extra = delay > 0 ? { delayMs: Math.round(delay) } : {};
+      if (raw === 'true' || raw === 'false') {
+        return { type: 'setVisible', target, value: raw === 'true', ...extra };
+      }
+      return { type: 'setVisible', target, expr: raw, ...extra };
     }
     case 'setVar': {
       if (!p.name) { ctx.warnings.push('「设变量」没有变量名，已跳过'); return null; }
@@ -220,8 +230,6 @@ function studioActionOf(node, ctx) {
       }
       return { type: 'playAnimation', clip: p.clip, reverse: p.reverse === 'true' };
     }
-    case 'mediaControl':
-      return ['[动作] 音乐控制 ' + (action.command || 'playPause'), 'act'];
     case 'launchApp': {
       if (!p.package) { ctx.warnings.push('「启动应用」没有包名，已跳过'); return null; }
       return { type: 'launchApp', package: p.package };
@@ -229,6 +237,29 @@ function studioActionOf(node, ctx) {
     case 'openUri': {
       if (!p.uri) { ctx.warnings.push('「打开链接」没有链接，已跳过'); return null; }
       return { type: 'openUri', uri: p.uri };
+    }
+    case 'brightness':
+    case 'volume':
+    case 'seek': {
+      // 三者都是表达式：空串会让引擎取 0，这里显式兜底
+      const expr = String(p.expr != null ? p.expr : '0').trim() || '0';
+      return { type: node.type, expr };
+    }
+    case 'panel': {
+      const kind = p.panel || 'wifi';
+      if (['wifi', 'bluetooth', 'airplane', 'hotspot'].indexOf(kind) < 0) {
+        ctx.warnings.push('「打开系统面板」取值无效（' + kind + '），已按 WiFi 处理');
+        return { type: 'panel', panel: 'wifi' };
+      }
+      return { type: 'panel', panel: kind };
+    }
+    case 'settings': {
+      const page = p.page || 'wifi';
+      if (['wifi', 'bluetooth', 'airplane', 'hotspot', 'display', 'sound'].indexOf(page) < 0) {
+        ctx.warnings.push('「打开设置页」取值无效（' + page + '），已按 WiFi 处理');
+        return { type: 'settings', page: 'wifi' };
+      }
+      return { type: 'settings', page };
     }
     case 'mediaControl': {
       const command = p.command || 'playPause';
@@ -375,7 +406,7 @@ function compileStudioGraph() {
   const edges = doc.edges.slice();
 
   const sources = nodes.filter(n =>
-    n.type === 'gesture' || n.type === 'session' || n.type === 'minute');
+    n.type === 'gesture' || n.type === 'session' || n.type === 'minute' || n.type === 'varTrigger' || n.type === 'drag');
   const rules = [];
 
   // 没有被任何线连出去也没连进来的节点：提示但不算错
@@ -408,6 +439,28 @@ function compileStudioGraph() {
       triggers = [{ trigger: 'session' }];
     } else if (source.type === 'minute') {
       triggers = [{ trigger: 'minute' }];
+    } else if (source.type === 'drag') {
+    // 拖动触发：target 必填（引擎要求），var 留空时由引擎派生
+    const dragTarget = String(source.params.target || '').trim();
+    if (!dragTarget) {
+      ctx.errors.push('「拖动触发」没有选拖动区元素');
+      return;
+    }
+    const axis = source.params.axis === 'y' ? 'y' : 'x';
+    triggers = [{
+      trigger: 'drag',
+      target: dragTarget,
+      var: String(source.params.var || '').trim() || undefined,
+      axis
+    }];
+  } else if (source.type === 'varTrigger') {
+      // 变量变化触发：引擎侧是 {trigger:'var', var:'名字'}
+      const name = String(source.params && source.params.var || '').trim();
+      if (!name) {
+        ctx.errors.push('「变量变化」节点没有填变量名');
+        return;
+      }
+      triggers = [{ trigger: 'var', var: name }];
     }
 
     const outPort = source.type === 'gesture' ? 'match' : 'fire';
@@ -470,8 +523,14 @@ function compileStudioGraph() {
   const existing = state.doc.interactions.vars || {};
   Object.keys(existing).forEach(name => {
     const raw = existing[name];
+    // persist 必须原样带走：编辑器里勾了"记住这个变量"，导出时丢了就等于没勾
     vars[name] = (raw && typeof raw === 'object')
-      ? { value: Number(raw.value) || 0, min: Number(raw.min) || 0, max: Number(raw.max ?? 1) }
+      ? {
+          value: Number(raw.value) || 0,
+          min: Number(raw.min) || 0,
+          max: Number(raw.max ?? 1),
+          ...(raw.persist === true ? { persist: true } : {})
+        }
       : { value: Number(raw) || 0, min: 0, max: 1 };
   });
   // 规则里 setVar 用到的变量如果没定义，补一个默认值，免得引擎里取不到
@@ -724,9 +783,10 @@ function toBool(v) {
 // 照着 TriggerParser 的校验逐条比一遍（触发白名单 / 动作白名单 / 属性白名单 /
 // 缓动名 / 必填字段 / 单规则 16 动作），把"推上手机才报错"提前到编辑期。
 const STUDIO_EASING_NAMES = ['linear', 'easeIn', 'easeOut', 'easeInOut', 'backOut', 'bounceOut'];
-const TRIGGER_TYPES = ['tap', 'gesture', 'var', 'minute', 'session'];
-const GESTURE_KINDS = ['tap', 'doubleTap', 'longPress', 'swipeLeft', 'swipeRight', 'swipeUp', 'swipeDown'];
-const ACTION_TYPES = ['setVar', 'setVisible', 'setProperty', 'playAnimation', 'launchApp', 'openUri', 'mediaControl', 'call', 'for', 'while'];
+const TRIGGER_TYPES = ['tap', 'gesture', 'var', 'minute', 'session', 'drag'];
+const GESTURE_KINDS = ['tap', 'doubleTap', 'longPress', 'swipeLeft', 'swipeRight', 'swipeUp', 'swipeDown', 'press', 'hold', 'release'];
+const ACTION_TYPES = ['setVar', 'setVisible', 'setProperty', 'playAnimation', 'launchApp', 'openUri', 'mediaControl', 'call',
+  'brightness', 'volume', 'seek', 'panel', 'settings', 'for', 'while'];
 const STUDIO_MEDIA_COMMANDS = ['playPause', 'next', 'prev', 'stop'];
 const PROPERTY_NAMES = ['x', 'y', 'scale', 'rotationZ', 'opacity'];
 
@@ -760,6 +820,15 @@ function validateStudioModel(model) {
       if (a.type === 'launchApp' && !a.package) errors.push(ap + '/package：缺少包名');
       if (a.type === 'openUri' && !a.uri) errors.push(ap + '/uri：缺少链接');
   if (a.type === 'mediaControl' && STUDIO_MEDIA_COMMANDS.indexOf(a.command) < 0) errors.push(ap + '/command：音乐控制命令无效');
+  if ((a.type === 'brightness' || a.type === 'volume' || a.type === 'seek') &&
+    (typeof a.expr !== 'string' || !a.expr)) errors.push(ap + '/expr：缺少表达式');
+  if (a.type === 'panel' && ['wifi', 'bluetooth', 'airplane', 'hotspot'].indexOf(a.panel) < 0) {
+    errors.push(ap + '/panel：取值只能是 wifi/bluetooth/airplane/hotspot');
+  }
+  if (a.type === 'settings' && ['wifi', 'bluetooth', 'airplane', 'hotspot', 'display', 'sound'].indexOf(a.page) < 0) {
+    errors.push(ap + '/page：取值只能是 wifi/bluetooth/airplane/hotspot/display/sound');
+  }
+  if (when.trigger === 'drag' && !when.target) errors.push(at + '/when/target：拖动触发必须给拖动区元素');
       if (a.type === 'call' && !a.call) errors.push(ap + '/call：缺少函数名');
       if (a.type === 'for') {
         if (!a.var) errors.push(ap + '/var：for 循环缺少循环变量名');

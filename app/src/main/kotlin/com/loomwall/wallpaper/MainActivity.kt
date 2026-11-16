@@ -648,6 +648,21 @@ class MainActivity : Activity() {
                 startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
             }.onFailure { toast("打不开通知使用权设置") }
         })
+        // 亮度调节要用：这是"特殊权限"，普通运行时权限对话框弹不出来，只能跳设置页
+        val canWrite = android.provider.Settings.System.canWrite(this)
+        add(permissionRow(
+            "修改系统设置", "系统面板的亮度滑条", canWrite,
+            if (canWrite) "已开启" else "去开启"
+        ) {
+            runCatching {
+                startActivity(
+                    Intent(
+                        android.provider.Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                        android.net.Uri.parse("package:" + packageName)
+                    )
+                )
+            }.onFailure { toast("打不开修改系统设置页面") }
+        })
         add(permissionRow(
             "录音权限", "音频可视化（频谱、律动）", canAudio,
             if (canAudio) "已开启" else "去开启"

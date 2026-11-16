@@ -82,6 +82,35 @@ class PreviewActivity : Activity() {
 
         thread.onVisibilityChanged(true)
         thread.start()
+
+        // 调试入口：`--ez open_app_picker true --es node_id <id>`
+        // 用来在没有触摸注入的环境里打开「选择应用」界面，验证列表与写回。
+        if (intent?.getBooleanExtra("open_app_picker", false) == true) {
+            val nodeId = intent.getStringExtra("node_id").orEmpty()
+            runCatching {
+                startActivity(
+                    android.content.Intent(this, com.loomwall.wallpaper.AppPickerActivity::class.java)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        .putExtra(com.loomwall.wallpaper.AppPickerActivity.EXTRA_NODE_ID, nodeId)
+                )
+            }.onFailure { Log.w(TAG, "打开选择器失败：${it.message}") }
+        }
+
+        // 调试入口 2：`--es test_bind_pkg <包名> --es node_id <id>`
+        // 没有触摸注入时，用它验证「绑定 → 写回预设 → 图标落盘」这条链路。
+        val testPkg = intent?.getStringExtra("test_bind_pkg")
+        if (!testPkg.isNullOrBlank()) {
+            val nodeId = intent.getStringExtra("node_id").orEmpty()
+            val pm = packageManager
+            val label = runCatching {
+                pm.getApplicationLabel(pm.getApplicationInfo(testPkg, 0)).toString()
+            }.getOrDefault(testPkg)
+            val icon = runCatching { pm.getApplicationIcon(testPkg) }.getOrNull()
+            val bitmap = com.loomwall.wallpaper.AppSlotBinder.bitmapOf(icon, 144)
+            val result = com.loomwall.wallpaper.AppSlotBinder.bind(this, nodeId, testPkg, label, bitmap)
+            bitmap?.recycle()
+            Log.i(TAG, "测试绑定 $testPkg → ok=${result.ok} ${result.message}")
+        }
     }
 
     private var downX = 0f

@@ -12,9 +12,26 @@ enum class Gesture(val jsonName: String) {
     SWIPE_LEFT("swipeLeft"),
     SWIPE_RIGHT("swipeRight"),
     SWIPE_UP("swipeUp"),
-    SWIPE_DOWN("swipeDown");
+    SWIPE_DOWN("swipeDown"),
+
+    /**
+     * 按下瞬间（还没抬手）。
+     *
+     * 加这三个事件是为了表达"必须按住才算数"的死手开关（dead man's switch）：
+     * - [PRESS]：手指按下，可以开始放倒计时/进度反馈
+     * - [HOLD]：按满 [HOLD_DURATION_MS] 且**手指还没抬**才算成立
+     * - [RELEASE]：抬手（或手势被系统取消），此时如果还没到 HOLD，预设应当撤销
+     *
+     * 只有 PRESS / HOLD / RELEASE 三者配合，预设才能区分"按满"和"中途松手"。
+     */
+    PRESS("press"),
+    HOLD("hold"),
+    RELEASE("release");
 
     companion object {
+        /** 按满多久算 HOLD：死手开关要求"一直按住"，这里取 5 秒。 */
+        const val HOLD_DURATION_MS = 5000L
+
         fun fromJson(name: String): Gesture? = entries.firstOrNull { it.jsonName == name }
     }
 }

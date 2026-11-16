@@ -1,4 +1,4 @@
-# Run the JVM unit tests without Gradle's test worker.
+﻿# Run the JVM unit tests without Gradle's test worker.
 #
 # Why this exists: Gradle's test executor talks to the test JVM over pipes.
 # In restricted environments (some sandboxes, hardened CI agents) that fails with
@@ -67,7 +67,10 @@ try {
         com.loomwall.wallpaper.scene.EasingTest `
         com.loomwall.wallpaper.scene.InteractionsParserTest `
         com.loomwall.wallpaper.engine.AnimationRuntimeTest com.loomwall.wallpaper.engine.BindingEvaluatorTest `
-        com.loomwall.wallpaper.editor.EditorStateTest com.loomwall.wallpaper.scene.TextTemplateTest com.loomwall.wallpaper.scene.EventsTest com.loomwall.wallpaper.scene.ImageNodeTest com.loomwall.wallpaper.engine.Mat2DTest com.loomwall.wallpaper.scene.ShapesTest com.loomwall.wallpaper.scene.SvgPathDataTest com.loomwall.wallpaper.scene.GradientSpecTest com.loomwall.wallpaper.scene.FeatherBlurTest com.loomwall.wallpaper.scene.ParallaxTest com.loomwall.wallpaper.scene.ExprTest com.loomwall.wallpaper.scene.RuleModelTest com.loomwall.wallpaper.engine.RuleRuntimeTest com.loomwall.wallpaper.engine.LoopRuleTest com.loomwall.wallpaper.engine.HitThroughTest com.loomwall.wallpaper.engine.TweenTest com.loomwall.wallpaper.engine.ReverseAnimationTest com.loomwall.wallpaper.engine.EffectiveAlphaTest com.loomwall.wallpaper.scene.PresetLibraryExportTest com.loomwall.wallpaper.scene.LrcTest com.loomwall.wallpaper.scene.BindingExprTest com.loomwall.wallpaper.scene.WeatherCodeTest com.loomwall.wallpaper.scene.AnimePresetTest com.loomwall.wallpaper.scene.TextWrapTest com.loomwall.wallpaper.scene.SvgStrokeTest
+        com.loomwall.wallpaper.editor.EditorStateTest com.loomwall.wallpaper.scene.TextTemplateTest com.loomwall.wallpaper.scene.EventsTest com.loomwall.wallpaper.scene.ImageNodeTest com.loomwall.wallpaper.engine.Mat2DTest com.loomwall.wallpaper.scene.ShapesTest com.loomwall.wallpaper.scene.SvgPathDataTest com.loomwall.wallpaper.scene.GradientSpecTest com.loomwall.wallpaper.scene.FeatherBlurTest com.loomwall.wallpaper.scene.ParallaxTest com.loomwall.wallpaper.scene.ExprTest com.loomwall.wallpaper.scene.RuleModelTest com.loomwall.wallpaper.engine.RuleRuntimeTest `
+        com.loomwall.wallpaper.engine.VarPersistenceTest `
+        com.loomwall.wallpaper.engine.DelayedVisibleTest `
+        com.loomwall.wallpaper.net.NotifyDigestTest com.loomwall.wallpaper.engine.LoopRuleTest com.loomwall.wallpaper.engine.HitThroughTest com.loomwall.wallpaper.engine.TweenTest com.loomwall.wallpaper.engine.ReverseAnimationTest com.loomwall.wallpaper.engine.EffectiveAlphaTest com.loomwall.wallpaper.scene.PresetLibraryExportTest com.loomwall.wallpaper.scene.LrcTest com.loomwall.wallpaper.scene.BindingExprTest com.loomwall.wallpaper.scene.WeatherCodeTest com.loomwall.wallpaper.scene.AnimePresetTest com.loomwall.wallpaper.scene.TextWrapTest com.loomwall.wallpaper.scene.SvgStrokeTest
     $code = $LASTEXITCODE
 } finally {
     Pop-Location

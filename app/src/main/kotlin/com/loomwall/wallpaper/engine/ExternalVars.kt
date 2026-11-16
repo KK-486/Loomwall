@@ -12,9 +12,22 @@ package com.loomwall.wallpaper.engine
  * - 进度（positionMs）在播放中每 2 秒补一次，壁纸不可见时立刻停止（见 NotificationRelay）。
  */
 internal object ExternalVars {
-    /** 当前未读通知条数。 */
+    /** 当前未读通知条数（= 通知栏里的条数）。 */
     @Volatile
     var notifyCount: Int = 0
+
+    /**
+     * 通知栏当前的内容摘要（已过滤 + 排序，最多 4 条）。
+     *
+     * 为什么整条列表落地而不是只留"最后一条"：壁纸要显示**多条**消息，
+     * 且必须和通知栏一致——用户手动清空通知栏后这里要立刻变空。
+     */
+    @Volatile
+    var notifyItems: List<com.loomwall.wallpaper.net.NotifyDigest.Item> = emptyList()
+
+    /** 通知栏是否为空（供「暂无消息」这类提示直接绑定）。 */
+    @Volatile
+    var notifyEmpty: Boolean = true
 
     /** 正在播放的媒体标题；空串表示没有。 */
     @Volatile
@@ -124,6 +137,22 @@ internal object ExternalVars {
 
     /** 区/县名（反查得到，例如"清城区"；拿不到时为空串） */
     var weatherDistrict: String = ""
+
+    /** 多日预报：0=昨天 1=今天 2=明天 3=后天 4=大后天（与 SystemVars.WEATHER_DAY_NAMES 对应）。 */
+    val weatherDayMax = FloatArray(5)
+    val weatherDayMin = FloatArray(5)
+    val weatherDayCode = IntArray(5) { -1 }
+    val weatherDayRain = FloatArray(5)
+    val weatherDayPrecip = FloatArray(5)
+    val weatherDayText = arrayOf("", "", "", "", "")
+
+    /** 未来 6 小时最大降水概率（%）与累计降水（mm）。 */
+    var weatherRainSoon: Float = 0f
+    var weatherRainMm: Float = 0f
+
+    /** 今日日出 / 日落（"06:39" 这种短格式）。 */
+    var weatherSunrise: String = ""
+    var weatherSunset: String = ""
 
     /** 数据变化时通知订阅方（壁纸可见时才有人订阅）。 */
     @Volatile

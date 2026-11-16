@@ -40,6 +40,8 @@ class LwpWallpaperService : WallpaperService() {
         private var downAtMs = 0L
         private var lastTapAtMs = 0L
         private var longPressFired = false
+    /** 诊断用：本次按下后收到过多少个 MOVE（区分"桌面没转发"与"转发了我没算对"）。 */
+    private var moveEvents = 0
         private var reloadReceiver: android.content.BroadcastReceiver? = null
 
         /**
@@ -54,16 +56,36 @@ class LwpWallpaperService : WallpaperService() {
                 MotionEvent.ACTION_DOWN -> {
                     downX = event.x
                     downY = event.y
+                    moveEvents = 0
                     downAtMs = SystemClock.uptimeMillis()
                     longPressFired = false
                     // 这条日志用来判断“启动器到底有没有把触摸转发给壁纸”。
                     // MIUI 桌面实测不转发，看到这条日志才说明交互动有戏。
                     Log.d(TAG, "touch down ${event.x},${event.y}")
+                    // 死手开关：按下立刻通知（预设可以开始放倒计时），
+                    // 按满 5 秒且**手指没抬**才发 HOLD；中途抬手由 ACTION_UP 发 RELEASE 撤销。
+                    renderThread?.onGesture(Gesture.PRESS, event.x, event.y)
+                    // 滑条要用：按下时记下起点，后续 MOVE 才能判断"在哪个拖动区里拖"
+                    renderThread?.onDragStart(event.x, event.y)
+                    mainHandler.postDelayed(holdRunnable, Gesture.HOLD_DURATION_MS)
                     mainHandler.postDelayed(longPressRunnable, LONG_PRESS_MS)
+                }
+
+                MotionEvent.ACTION_MOVE -> {
+                    // 壁纸滑条（亮度/音量）靠这个事件：把当前位置交给渲染线程换算百分比
+                    moveEvents += 1
+                    if (moveEvents == 1 || moveEvents % 10 == 0) {
+                        Log.d(TAG, "touch move #$moveEvents ${event.x},${event.y}")
+                    }
+                    renderThread?.onDrag(event.x, event.y)
                 }
 
                 MotionEvent.ACTION_UP -> {
                     mainHandler.removeCallbacks(longPressRunnable)
+                    mainHandler.removeCallbacks(holdRunnable)
+                    // 先告诉预设"手指抬了"，还没按满 5 秒的倒计时会被它自己撤销
+                    renderThread?.onGesture(Gesture.RELEASE, event.x, event.y)
+                    renderThread?.onDragEnd()
                     val duration = SystemClock.uptimeMillis() - downAtMs
                     val slop = tapSlop()
                     val dx = event.x - downX
@@ -101,9 +123,24 @@ class LwpWallpaperService : WallpaperService() {
                 }
 
                 MotionEvent.ACTION_CANCEL -> {
+                    // 收到 CANCEL 说明手势被桌面/系统抢走（翻页、下拉通知栏等），
+                    // 这正是"滑条拖不动"的典型原因，必须留痕
+                    Log.d(TAG, "touch cancel（MOVE 共 $moveEvents 次，手势被系统收走）")
+                    moveEvents = 0
                     mainHandler.removeCallbacks(longPressRunnable)
+                    mainHandler.removeCallbacks(holdRunnable)
+                    // 手势被系统/桌面抢走也算松手，一样撤销
+                    renderThread?.onGesture(Gesture.RELEASE, event.x, event.y)
                     longPressFired = false
                 }
+            }
+        }
+
+        /** 按满 [Gesture.HOLD_DURATION_MS] 且手指仍按着 → 死手开关成立。抬手会取消这个计时器。 */
+        private val holdRunnable = object : Runnable {
+            override fun run() {
+                Log.d(TAG, "手势：按满 ${Gesture.HOLD_DURATION_MS}ms")
+                renderThread?.onGesture(Gesture.HOLD, downX, downY)
             }
         }
 
@@ -123,6 +160,22 @@ class LwpWallpaperService : WallpaperService() {
          * 但**用户直接触摸壁纸**属于允许的场景，实测可用。仍要 catch 住失败，
          * 不能让一次启动失败把壁纸搞崩。
          */
+        /**
+         * 打开"选择应用"界面。
+         *
+         * @param editMode true = 长按进入（先弹「切换软件 / 取消绑定」）
+         */
+        private fun openAppPicker(nodeId: String, editMode: Boolean) {
+            val intent = android.content.Intent(applicationContext, com.loomwall.wallpaper.AppPickerActivity::class.java)
+                // NEW_TASK + 空 taskAffinity（见清单）→ 选择器单独成栈，
+                // 取消/保存后回到桌面，而不是退回 LOOW 自己的某个页面
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(com.loomwall.wallpaper.AppPickerActivity.EXTRA_NODE_ID, nodeId)
+                .putExtra(com.loomwall.wallpaper.AppPickerActivity.EXTRA_EDIT_MODE, editMode)
+            runCatching { startActivity(intent) }
+                .onFailure { Log.w(TAG, "打开选择器失败：${it.message}") }
+        }
+
         private fun launchFromWallpaper(action: com.loomwall.wallpaper.scene.EventAction) {
             val intent = when (action) {
                 is com.loomwall.wallpaper.scene.EventAction.LaunchApp -> {
@@ -197,8 +250,13 @@ class LwpWallpaperService : WallpaperService() {
                 onLaunch = { action -> launchFromWallpaper(action) },
                 context = applicationContext,
                 // 媒体控制：复用通知监听器已持有的 MediaController，不需要新权限
-                onMediaCommand = { command ->
+                onAppSlotPick = { nodeId -> openAppPicker(nodeId, editMode = false) },
+            onAppSlotOptions = { nodeId -> openAppPicker(nodeId, editMode = true) },
+            onMediaCommand = { command ->
                     com.loomwall.wallpaper.net.NotificationRelay.mediaCommand(command)
+                },
+                onMediaSeek = { percent ->
+                    com.loomwall.wallpaper.net.NotificationRelay.mediaSeek(percent)
                 },
                 onBindingsChanged = { has ->
                     // 回调来自渲染线程，切回主线程再订阅/注销

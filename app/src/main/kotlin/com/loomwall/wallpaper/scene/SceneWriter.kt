@@ -186,6 +186,16 @@ object SceneWriter {
             if (rect.maskW != 100f) put("maskW", round1(rect.maskW))
             if (rect.maskH != 100f) put("maskH", round1(rect.maskH))
         }
+        if (rect.shape == ShapeKind.APPSLOT) {
+            // 绑定信息只在非空时写，未绑定的容器保持最小 JSON
+            if (rect.appPkg.isNotBlank()) put("appPkg", rect.appPkg)
+            if (rect.appLabel.isNotBlank()) put("appLabel", rect.appLabel)
+            if (rect.appIcon.isNotBlank()) put("appIcon", rect.appIcon)
+            put("borderColor", rect.borderColor.toHex())
+            put("borderWidth", round2(rect.borderWidth))
+            put("dash", round1(rect.dash))
+            put("plusColor", rect.plusColor.toHex())
+        }
     }
 
     private fun round1(value: Float): Double = (value * 10f).roundToInt() / 10.0

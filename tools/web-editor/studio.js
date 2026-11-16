@@ -49,6 +49,15 @@ const STUDIO_DEFS = {
     params: { target: '', gestures: ['tap'] },
     inline: ['target', 'gestures']
   },
+  drag: {
+    cat: 'source', name: '拖动触发', icon: '🎚', desc: '按住拖动时输出 · 比例写进变量',
+    hint: '选好拖动区后，下面会自动给出变量名（drag_<元素>）并建进变量表；拖动时把 0~100 写进它，再跑规则。接到「设置亮度/音量/进度」即可，值会自动填好。',
+    inputs: [],
+    outputs: [{ id: 'fire', label: '拖动中', type: 'bool' }],
+    // target 必填；var 留空则由引擎派生 drag_<target>；axis 决定比例按横还是竖算
+    params: { target: '', var: '', axis: 'x' },
+    inline: ['target', 'var', 'axis']
+  },
   sysVar: {
     cat: 'source', name: '系统变量', icon: '🔋', desc: '电量 / 时间 / 内存等',
     hint: '输出数值，接「比较」「数值映射」。',
@@ -62,6 +71,13 @@ const STUDIO_DEFS = {
     inputs: [],
     outputs: [{ id: 'value', label: '数值', type: 'number' }],
     params: { name: '' }, inline: ['name']
+  },
+  varTrigger: {
+    cat: 'source', name: '变量变化', icon: '🔔', desc: '某个变量被改动时触发',
+    hint: '输出触发事件；变量在「变量 / 函数」面板里定义。适合"数量 / 档位"这类状态驱动的界面。',
+    inputs: [],
+    outputs: [{ id: 'fire', label: '命中', type: 'bool' }],
+    params: { var: '' }, inline: ['var']
   },
   layerRef: {
     cat: 'source', name: '图层引用', icon: '🧩', desc: '选择一个图层作为引用',
@@ -216,7 +232,7 @@ const STUDIO_DEFS = {
       { id: 'value', label: '值', type: 'any' }
     ],
     outputs: [{ id: 'done', label: '完成', type: 'event', color: '#38bdf8' }],
-    params: { target: '', value: 'true' }, inline: ['target', 'value']
+    params: { target: '', value: 'true', delay: '0' }, inline: ['target', 'value', 'delay']
   },
   setVar: {
     cat: 'action', name: '设变量', icon: '🔣', desc: '给变量赋值 · 可顺序续接',
@@ -242,6 +258,72 @@ const STUDIO_DEFS = {
     params: { target: '', clip: '', reverse: 'false' },
     inline: ['target', 'clip', 'reverse']
   },
+  /**
+   * 音乐控制：播放/暂停、上一首、下一首、停止。
+   *
+   * 以前编译器里已经有这个动作分支，但 STUDIO_DEFS 没有节点定义，
+   * 于是"工作台里根本放不出这个节点"——媒体按钮只能用 rules 手写。
+   */
+  mediaControl: {
+    cat: 'action', name: '音乐控制', icon: '🎵', desc: '播放暂停 · 上一首 · 下一首',
+    hint: '只做转发，依赖系统「通知使用权」；没授权时点了不会有反应。',
+    inputs: [
+      { id: 'condition', label: '触发', type: 'bool' },
+      { id: 'sequence', label: '顺序', type: 'event' }
+    ],
+    outputs: [{ id: 'done', label: '完成', type: 'event', color: '#38bdf8' }],
+    params: { command: 'playPause' }, inline: ['command']
+  },
+  brightness: {
+    cat: 'action', name: '设置亮度', icon: '🔆', desc: '把屏幕亮度设成表达式的值（0-100）',
+    hint: '值填 0~100；把「拖动触发」连过来会自动填成它的变量名。需要系统「修改设置」权限。',
+    inputs: [
+      { id: 'condition', label: '触发', type: 'bool' },
+      { id: 'sequence', label: '顺序', type: 'event' }
+    ],
+    outputs: [{ id: 'done', label: '完成', type: 'event', color: '#38bdf8' }],
+    params: { expr: '' }, inline: ['expr']
+  },
+  volume: {
+    cat: 'action', name: '设置音量', icon: '🔊', desc: '把媒体音量设成表达式的值（0-100）',
+    hint: '值填 0~100，按百分比换算媒体音量档位；把「拖动触发」连过来会自动填好变量名。',
+    inputs: [
+      { id: 'condition', label: '触发', type: 'bool' },
+      { id: 'sequence', label: '顺序', type: 'event' }
+    ],
+    outputs: [{ id: 'done', label: '完成', type: 'event', color: '#38bdf8' }],
+    params: { expr: '' }, inline: ['expr']
+  },
+  seek: {
+    cat: 'action', name: '音乐进度', icon: '⏩', desc: '跳转到歌曲的百分比位置（0-100）',
+    hint: '值填 0~100（歌曲进度百分比）；把「拖动触发」连过来会自动填好变量名。需要「通知使用权」。',
+    inputs: [
+      { id: 'condition', label: '触发', type: 'bool' },
+      { id: 'sequence', label: '顺序', type: 'event' }
+    ],
+    outputs: [{ id: 'done', label: '完成', type: 'event', color: '#38bdf8' }],
+    params: { expr: '' }, inline: ['expr']
+  },
+  panel: {
+    cat: 'action', name: '打开系统面板', icon: '🪟', desc: 'WiFi / 蓝牙 / 飞行 / 热点 快捷面板',
+    hint: '部分系统会拒绝直接打开某个面板，此时引擎自动退回设置页。',
+    inputs: [
+      { id: 'condition', label: '触发', type: 'bool' },
+      { id: 'sequence', label: '顺序', type: 'event' }
+    ],
+    outputs: [{ id: 'done', label: '完成', type: 'event', color: '#38bdf8' }],
+    params: { panel: 'wifi' }, inline: ['panel']
+  },
+  settings: {
+    cat: 'action', name: '打开设置页', icon: '⚙', desc: '跳到系统设置的具体页面',
+    hint: '比「打开系统面板」更稳；面板被系统拒绝时用它。',
+    inputs: [
+      { id: 'condition', label: '触发', type: 'bool' },
+      { id: 'sequence', label: '顺序', type: 'event' }
+    ],
+    outputs: [{ id: 'done', label: '完成', type: 'event', color: '#38bdf8' }],
+    params: { page: 'wifi' }, inline: ['page']
+  },
   launchApp: {
     cat: 'action', name: '启动应用', icon: '📱', desc: '按包名启动 · 可顺序续接',
     hint: '需要 Android 端启动权限；包名可在「变量 / 函数」里查。',
@@ -263,6 +345,9 @@ const STUDIO_DEFS = {
     params: { uri: '' }, inline: ['uri']
   },
   callFn: {
+    // 暂时下线：函数目前只能靠导入预设得到（没有定义入口），
+    // 先不暴露给用户，等函数编辑器做完再打开。
+    hidden: true,
     cat: 'action', name: '调用函数', icon: 'ƒ', desc: '调用已定义函数 · 可顺序续接',
     hint: '函数在「变量 / 函数」面板里定义。',
     inputs: [
@@ -302,7 +387,8 @@ const STUDIO_CATS = [
 
 const GESTURE_OPTIONS = [
   ['tap', '单击'], ['doubleTap', '双击'], ['longPress', '长按'],
-  ['swipeLeft', '左滑'], ['swipeRight', '右滑'], ['swipeUp', '上滑'], ['swipeDown', '下滑']
+  ['swipeLeft', '左滑'], ['swipeRight', '右滑'], ['swipeUp', '上滑'], ['swipeDown', '下滑'],
+    ['press', '按下'], ['hold', '按住 5 秒'], ['release', '松手']
 ];
 
 // ---------------------------------------------------------------- 状态
@@ -350,6 +436,51 @@ function studioInputWired(nodeId, portId) {
  * 平移与缩放都写到 playfield 的 transform 上。
  * 之前把 offset 存在 studio.offset 里、渲染时却没用到，所以"拖空白不动"。
  */
+/**
+ * 缩放到能看见全部节点（"适应全部"）。
+ *
+ * 为什么需要：导入一张已有的规则表会生成上百个节点，铺开有几万像素。
+ * 没有这个功能，用户打开工作台只看得到左上角一块，很容易以为"节点没导进来"。
+ * 计算方式：取所有卡片的包围盒，按画布可视区反算出 zoom，再把包围盒居中。
+ */
+function studioFitToContent(padding) {
+  const field = document.getElementById('studio-playfield');
+  const canvas = document.getElementById('studio-canvas');
+  if (!field || !canvas) return false;
+  const cards = Array.prototype.slice.call(field.querySelectorAll('.st-node'));
+  if (!cards.length) return false;
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  cards.forEach(card => {
+    const x = parseFloat(card.style.left) || 0;
+    const y = parseFloat(card.style.top) || 0;
+    const w = card.offsetWidth || 240;
+    const h = card.offsetHeight || 170;
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x + w > maxX) maxX = x + w;
+    if (y + h > maxY) maxY = y + h;
+  });
+  if (!isFinite(minX) || !isFinite(minY)) return false;
+
+  const pad = padding == null ? 60 : padding;
+  // 右侧悬浮预览窗会挡住内容：把可用宽度让出来，否则"适应全部"后右半边仍被压住
+  const floatWrap = canvas.querySelector('.studio-float');
+  const floatW = floatWrap ? (floatWrap.offsetWidth || 300) + 24 : 0;
+  const viewW = Math.max(320, (canvas.clientWidth || 1200) - floatW);
+  const viewH = canvas.clientHeight || 800;
+  const spanX = Math.max(1, maxX - minX);
+  const spanY = Math.max(1, maxY - minY);
+  const zoom = Math.max(0.08, Math.min(1, Math.min((viewW - pad * 2) / spanX, (viewH - pad * 2) / spanY)));
+
+  studio.zoom = zoom;
+  // CSS 是 translate(offset) scale(zoom)：屏幕坐标 = 画布坐标 × zoom + offset
+  studio.offset.x = (viewW - spanX * zoom) / 2 - minX * zoom;
+  studio.offset.y = (viewH - spanY * zoom) / 2 - minY * zoom;
+  applyStudioStage();
+  return true;
+}
+
 function applyStudioStage() {
   const field = document.getElementById('studio-playfield');
   if (!field) return;
@@ -370,7 +501,14 @@ function studioPointFromClient(clientX, clientY) {
 
 // ---------------------------------------------------------------- 打开 / 关闭
 function openStudio() {
-  if (studio.open) return;
+  if (studio.open) {
+    // 已经开着：如果之前标记过"要适配"，这里补一次
+    if (studio.pendingFit) {
+      studio.pendingFit = false;
+      studioFitToContent();
+    }
+    return;
+  }
   const layer = document.getElementById('studio');
   if (!layer) return;
 
@@ -415,6 +553,13 @@ function openStudio() {
   renderStudioLog();
   bindStudioSim();
   applyStudioStage();
+  // 导入时标记过"要适配"：等卡片进 DOM 后缩放到能看见全部节点
+  if (studio.pendingFit) {
+    studio.pendingFit = false;
+    requestAnimationFrame(() => {
+      if (!studioFitToContent()) applyStudioStage();
+    });
+  }
   setTimeout(() => { if (typeof resizeCanvas === 'function') resizeCanvas(); }, 60);
 }
 
@@ -534,7 +679,7 @@ function renderStudioLibrary() {
 
   for (const [catId, catName, catColor] of STUDIO_CATS) {
     const matched = Object.entries(STUDIO_DEFS)
-      .filter(([, def]) => def.cat === catId)
+      .filter(([, def]) => def.cat === catId && !def.hidden)
       .filter(([type, def]) => !q ||
         def.name.toLowerCase().includes(q) ||
         def.desc.toLowerCase().includes(q) ||
@@ -680,6 +825,31 @@ function startLibraryDrag(ev, type, presetTarget) {
   document.addEventListener('pointerup', up);
 }
 
+/**
+ * 拖动触发的变量名：留空时派生为 drag_<拖动区元素>，并保证它出现在变量表里。
+ *
+ * 为什么必须自动做：拖动触发"把 0~100 写进变量"这件事在节点上完全看不见，
+ * 用户不知道动作里该引用什么名字。派生 + 建变量之后，右栏变量面板能看到它，
+ * 动作的「值」下拉也能选到它。
+ */
+function ensureDragVar(node, force, prevValue) {
+  if (!node || node.type !== 'drag') return;
+  const target = String(node.params.target || '').trim();
+  const derived = target ? ('drag_' + target) : '';
+  const current = String(node.params.var || '').trim();
+  // 空着、或还停留在"上一次自动派生"的名字上 → 跟着目标更新；手填过的不动
+  const wasDerived = !current || current === prevValue || /^drag_/.test(current);
+  if (force || wasDerived) node.params.var = derived;
+  const name = String(node.params.var || '').trim();
+  if (!name) return;
+  const varsObj = state.doc.interactions.vars || (state.doc.interactions.vars = {});
+  if (!varsObj[name]) {
+    varsObj[name] = { value: 0, min: 0, max: 100 };
+    if (typeof renderMyVars === 'function') renderMyVars();
+    studioLog('已自动创建变量 ' + name + '（拖动时写入 0~100）');
+  }
+}
+
 function addStudioNode(type, px, py, presetTarget) {
   const def = STUDIO_DEFS[type];
   if (!def) return;
@@ -696,6 +866,8 @@ function addStudioNode(type, px, py, presetTarget) {
   };
   // 从图层库拖出来时直接把目标图层填好，省一次手动选择
   if (presetTarget && 'target' in node.params) node.params.target = presetTarget;
+  // 拖动触发：从图层库拖出来时目标已知，直接把变量名派生好
+  if (type === 'drag') ensureDragVar(node, true);
   doc.nodes.push(node);
   renderStudioCanvas();
   selectStudioNode(node.id);
@@ -854,6 +1026,9 @@ function studioInlineField(node, key) {
 
   const layers = (typeof attrLayers === 'function') ? attrLayers() : [];
   const vars = Object.keys(state.doc.interactions.vars || {});
+  // 函数名也做成下拉：callFn 的 name 是 inline 参数，走的是这个函数而不是参数面板，
+  // 之前只给参数面板加了下拉，所以卡片上仍然是手打
+  const fnNames = Object.keys((state.doc.interactions && state.doc.interactions.functions) || {});
   // 动画组按图层过滤：播放动画先定图层，只列这一层的组（组名 + 轨道摘要）
   const allClips = (typeof window.clips === 'function') ? window.clips() : [];
   const clipTarget = node.params.target || '';
@@ -935,11 +1110,21 @@ function studioInlineField(node, key) {
     input.appendChild(new Option('选择图层…', ''));
     layers.forEach(l => input.appendChild(new Option(l, l)));
     input.value = node.params[key] || '';
-  } else if (key === 'name' && node.type === 'varChanged' && vars.length) {
+  } else if ((key === 'name' || key === 'var') &&
+             (node.type === 'varChanged' || node.type === 'varTrigger' || node.type === 'setVar')) {
+    // 变量名必须是下拉：手打拼错既没有提示，也不会触发，属于最难查的一类错。
+    // 三个节点的参数键不一样（变量=name、变量变化=var、设变量=name），这里一起覆盖。
     input = document.createElement('select');
-    input.appendChild(new Option('选择变量…', ''));
+    input.appendChild(new Option(vars.length ? '选择变量…' : '还没有变量', ''));
     vars.forEach(v => input.appendChild(new Option(v, v)));
-    input.value = node.params[key] || '';
+    const current = node.params[key] || '';
+    if (current && !vars.includes(current)) {
+      // 旧预设里可能有未定义的变量名：保留成选项，避免一打开就被清成空
+      input.appendChild(new Option(current + '（未定义）', current));
+    }
+    input.appendChild(new Option('＋ 新建变量…', '__new__'));
+    input.value = current;
+    input.dataset.newVarHook = '1';
   } else if (key === 'clip') {
     // 动画组按图层过滤：先定图层，只列这一层的组，并带上组名与轨道摘要
     input = document.createElement('select');
@@ -955,7 +1140,57 @@ function studioInlineField(node, key) {
       input.appendChild(new Option(name + suffix, c.id));
     });
     input.value = node.params[key] || '';
-  } else if (key === 'unit') {
+  } else if (node.type === 'drag' && key === 'var') {
+    // 变量名默认由拖动区派生；这里把"它会自动生成"写在输入框里，
+    // 免得新手以为要自己想一个名字
+    input = document.createElement('input');
+    input.type = 'text';
+    const derived = node.params.target ? ('drag_' + node.params.target) : '';
+    input.placeholder = derived ? ('留空 = ' + derived) : '留空 = drag_<拖动区id>';
+    input.title = '拖动时引擎把 0~100 写进这个变量；「设置亮度/音量/进度」的「值」填它即可';
+    input.value = node.params[key] === undefined ? '' : node.params[key];
+  } else if (key === 'expr' &&
+    (node.type === 'brightness' || node.type === 'volume' || node.type === 'seek')) {
+    // 「值」既可以写数字/公式，也可以直接选一个变量（例如拖动触发写出的 drag_bright）
+    input = document.createElement('input');
+    input.type = 'text';
+    const dragVars = vars.filter(v => /^drag_/.test(v));
+    const listId = 'st-vars-' + String(node.id).replace(/[^\w-]/g, '');
+    let dl = document.getElementById(listId);
+    if (dl) dl.remove();
+    dl = document.createElement('datalist');
+    dl.id = listId;
+    vars.forEach(v => {
+      const o = document.createElement('option');
+      o.value = v;
+      dl.appendChild(o);
+    });
+    document.body.appendChild(dl);
+    input.setAttribute('list', listId);
+    input.placeholder = dragVars.length
+      ? ('0~100，或选变量（如 ' + dragVars[0] + '）')
+      : '0~100，或变量名';
+    input.title = '这里填 0~100 的数值或表达式；把「拖动触发」连过来会自动填好变量名';
+    input.value = node.params[key] === undefined ? '' : node.params[key];
+  } else if (key === 'axis') {
+  // 拖动轴：横轴按左→右算比例，竖轴按上→下算
+  input = document.createElement('select');
+  [['x', '横向（左→右）'], ['y', '纵向（上→下）']].forEach(([v, t]) => input.appendChild(new Option(t, v)));
+  input.value = node.params[key] || 'x';
+} else if (key === 'panel') {
+  // 与引擎 openSystemPanel 支持的四种一致
+  input = document.createElement('select');
+  [['wifi', 'WiFi'], ['bluetooth', '蓝牙'], ['airplane', '飞行模式'], ['hotspot', '热点']]
+    .forEach(([v, t]) => input.appendChild(new Option(t, v)));
+  input.value = node.params[key] || 'wifi';
+} else if (key === 'page') {
+  // 与引擎 openSystemSettings 支持的页面一致
+  input = document.createElement('select');
+  [['wifi', 'WiFi'], ['bluetooth', '蓝牙'], ['airplane', '飞行模式'], ['hotspot', '热点'],
+   ['display', '显示'], ['sound', '声音']]
+    .forEach(([v, t]) => input.appendChild(new Option(t, v)));
+  input.value = node.params[key] || 'wifi';
+} else if (key === 'unit') {
     // 定时单位：存英文键（ms/s/min），显示中文
     input = document.createElement('select');
     [['ms', '毫秒'], ['s', '秒'], ['min', '分']].forEach(([v, label]) => input.appendChild(new Option(label, v)));
@@ -988,6 +1223,12 @@ function studioInlineField(node, key) {
     input.appendChild(new Option('正向（首帧→尾帧）', 'false'));
     input.appendChild(new Option('反向（尾帧→首帧）', 'true'));
     input.value = node.params[key] || 'false';
+  } else if (key === 'name' && node.type === 'callFn') {
+    // 函数名下拉（卡片上的 inline 字段走这里）
+    input = document.createElement('select');
+    input.appendChild(new Option(fnNames.length ? '（选择函数）' : '（还没有函数）', ''));
+    fnNames.forEach(f => input.appendChild(new Option(f, f)));
+    input.value = node.params[key] || '';
   } else if (key === 'value' && node.type === 'setVis') {
     // 只有「显隐」节点的值才是 显示/隐藏；定时器的值必须走数字输入框
     input = document.createElement('select');
@@ -998,8 +1239,10 @@ function studioInlineField(node, key) {
     input = document.createElement('input');
     input.type = 'text';
     input.value = node.params[key] === undefined ? '' : node.params[key];
+    // 函数名没有可选内容时，说明白"还没定义函数"，别只显示一个"空"
     input.placeholder = key === 'duration' ? '0 = 瞬移'
-      : (def.params[key] === '' ? '空' : String(def.params[key]));
+      : (node.type === 'callFn' && key === 'name' ? '（还没有函数，见右栏「变量 / 函数」）'
+      : (def.params[key] === '' ? '空' : String(def.params[key])));
   }
   const commit = () => {
     const prev = node.params[key];
@@ -1008,15 +1251,61 @@ function studioInlineField(node, key) {
     renderStudioParams();
     // 改「图层」会影响同卡片里「动画」下拉的内容（动画组是按图层列的），
     // 所以这里必须重画卡片，否则下拉还停在上一层。
-    if (key === 'target' && prev !== input.value) renderStudioCanvas();
+    if (key === 'target' && prev !== input.value) {
+      // 拖动触发换了拖动区：变量名跟着派生（手填过的不覆盖），并建进变量表
+      if (node.type === 'drag') ensureDragVar(node, false, prev);
+      renderStudioCanvas();
+    }
     // 时长在 0 与非 0 之间切换时，「缓动」的可用状态要跟着变
     if (key === 'duration' && (studioNum(prev, 0) <= 0) !== (studioNum(input.value, 0) <= 0)) {
       renderStudioCanvas();
     }
   };
-  input.onchange = commit;
-  if (input.tagName === 'INPUT') input.oninput = commit;
+  if (input.dataset && input.dataset.newVarHook === '1') {
+    // 选中「＋ 新建变量…」时先问名字，建好后直接绑到本节点
+    input.onchange = async () => {
+      if (input.value !== '__new__') { commit(); return; }
+      const prev = node.params[key];
+      const varsObj = state.doc.interactions.vars || (state.doc.interactions.vars = {});
+      let n = 1;
+      while (varsObj['v' + n] !== undefined) n += 1;
+      const suggested = 'v' + n;
+      const typed = await askDialog({
+        title: '新建变量',
+        meta: '建好后直接绑定到这个节点',
+        message: '只能字母、数字、下划线，且不能以数字开头',
+        input: true,
+        value: suggested,
+      });
+      if (typed === null) { input.value = prev || ''; return; }
+      const name = (typed || '').trim() || suggested;
+      if (typeof isValidVarName === 'function' && !isValidVarName(name)) {
+        status('变量名不合法：' + name);
+        input.value = prev || '';
+        return;
+      }
+      if (!varsObj[name]) varsObj[name] = { value: 0, min: 0, max: 1 };
+      node.params[key] = name;
+      persistDoc();
+      renderStudioParams();
+      renderStudioCanvas();
+      if (typeof renderMyVars === 'function') renderMyVars();
+      status('已新建变量 ' + name + ' 并绑定到此节点');
+    };
+  } else {
+    input.onchange = commit;
+    if (input.tagName === 'INPUT') input.oninput = commit;
+  }
   wrap.appendChild(input);
+  // 变量名没定义时给红字：否则节点看起来连好了，实际永远不会触发
+  if ((key === 'name' || key === 'var') &&
+      (node.type === 'varChanged' || node.type === 'varTrigger' || node.type === 'setVar') &&
+      node.params[key] && !vars.includes(node.params[key])) {
+    const warn = el('div', 'st-inline-note', '变量「' + node.params[key] + '」不存在，此节点不会生效');
+    warn.style.color = '#f2777a';
+    wrap.appendChild(warn);
+  }
+
   return wrap;
 }
 
@@ -1159,6 +1448,22 @@ function tryFinishLink(portEl) {
   // 一个输入口只接一条线：新连线替换旧的
   doc.edges = doc.edges.filter(e => !(e.to === toId && e.toPort === toPort));
   doc.edges.push({ from: link.fromId, fromPort: link.fromPort, to: toId, toPort: toPort });
+
+  // 拖动触发 → 设置亮度/音量/进度：值还空着就自动填成拖动变量，
+  // 否则新手连完线仍要自己想"该填什么"，等于没接上。
+  const fromNode = doc.nodes.find(n => n.id === link.fromId);
+  const toNode = doc.nodes.find(n => n.id === toId);
+  if (fromNode && fromNode.type === 'drag' && toNode &&
+    ['brightness', 'volume', 'seek'].indexOf(toNode.type) >= 0 &&
+    !String(toNode.params.expr || '').trim()) {
+    ensureDragVar(fromNode, false);
+    const v = String(fromNode.params.var || '').trim();
+    if (v) {
+      toNode.params.expr = v;
+      studioLog('已把「' + (STUDIO_DEFS[toNode.type] || {}).name + '」的值设为 ' + v + '（拖动时 0~100）');
+    }
+  }
+
   renderStudioCanvas();
   studioLog('已连线：' + portTypeName(link.type));
 }
@@ -1454,8 +1759,10 @@ function studioParamLabel(type, key) {
     target: '图层', kind: '手势', gestures: '手势（可多选）',
     name: type === 'sysVar' ? '变量' : (type === 'callFn' ? '函数' : '变量'),
     op: '运算符', a: 'A', b: 'B', condition: '条件', count: '次数',
-    // for 里 var 是「循环变量」，while 里它是「轮次变量」（每轮自动加一，条件里直接用）
-    var: type === 'whileLoop' ? '轮次变量' : '循环变量',
+    // for 里 var 是「循环变量」，while 里它是「轮次变量」（每轮自动加一，条件里直接用）；
+    // 拖动触发的 var 是"拖动时写入 0~100 的变量"，和循环完全无关，必须单独命名
+    var: type === 'whileLoop' ? '轮次变量'
+      : (type === 'drag' ? '拖动变量（写入 0~100）' : '循环变量'),
     unit: '单位',
     start: '起始', step: '步长', max: '最多',
     prop: '属性', expr: '值', duration: '时长(ms)', easing: '缓动',
@@ -1585,12 +1892,19 @@ function setupStudio() {
   };
 
   const applyZoom = delta => {
-    studio.zoom = Math.max(0.4, Math.min(2, studio.zoom + delta));
+    studio.zoom = Math.max(0.08, Math.min(2, studio.zoom + delta));
     applyStudioStage();
   };
   document.querySelectorAll('[data-studio-zoom]').forEach(btn => {
     btn.onclick = () => applyZoom(btn.dataset.studioZoom === 'in' ? 0.15 : -0.15);
   });
+
+  const fitBtn = document.getElementById('studio-fit');
+  if (fitBtn) {
+    fitBtn.onclick = () => {
+      if (!studioFitToContent()) status('工作台上还没有节点');
+    };
+  }
 
   const canvasBox = document.getElementById('studio-canvas');
   if (canvasBox) {

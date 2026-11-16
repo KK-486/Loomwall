@@ -33,6 +33,18 @@ internal object VarsSnapshot {
         texts = nextTexts
     }
 
+    /**
+     * 只改一个键：复制一份快照再替换，读方仍然看到一致的一帧。
+     *
+     * 用途是"高频单值变更"（拖亮度/音量）：全量 publish 要读电池/内存/存储/天气并重建上百个键，
+     * 拖动时每 40ms 调一次会把主线程占满，界面看起来就是"数字几秒才跳一次"。
+     */
+    fun patch(name: String, value: Float) {
+        val next = HashMap(values)
+        next[name] = value
+        values = next
+    }
+
     fun get(): Map<String, Float> = values
 
     fun getTexts(): Map<String, String> = texts
@@ -104,6 +116,21 @@ class SystemInputHub(
     fun notifyFps(fps: Float) {
         if (!attached) return
         values[SystemVars.RENDER_FPS] = fps
+        // 亮度/音量：每次发布现读，系统音量键改过也能对上
+        values[SystemVars.BRIGHTNESS] = runCatching {
+            val v = android.provider.Settings.System.getInt(
+                context.contentResolver, android.provider.Settings.System.SCREEN_BRIGHTNESS, -1
+            )
+            if (v < 0) 50f else (v / 255f * 100f).coerceIn(0f, 100f)
+        }.getOrDefault(50f)
+        values[SystemVars.VOLUME] = runCatching {
+            val am = context.getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
+            if (am == null) 50f else {
+                val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+                if (max <= 0) 0f else
+                    (am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) * 100f / max).coerceIn(0f, 100f)
+            }
+        }.getOrDefault(50f)
         // 只通知重绘，不在这里重复刷新其它变量
         onChanged()
     }
@@ -300,10 +327,21 @@ class SystemInputHub(
     private fun networkManager(): ConnectivityManager? =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 
+    /** 通知面板最多显示 4 条（和 NotifyDigest.MAX_LINES 对齐）。 */
+    private val NOTIFY_SLOTS = com.loomwall.wallpaper.net.NotifyDigest.MAX_LINES
+
     private fun publish() {
         val snapshot = HashMap(values)
         // 通知 / 媒体 / 步数由别的组件写入，这里合并进快照
         snapshot[SystemVars.NOTIFY_COUNT] = ExternalVars.notifyCount.toFloat()
+        // 通知流：条数 / 是否为空 / 每个槽位的"有没有内容"
+        val notifyItems = ExternalVars.notifyItems
+        snapshot[SystemVars.NOTIFY_SHOWN] = notifyItems.size.toFloat()
+        snapshot[SystemVars.NOTIFY_EMPTY] = if (ExternalVars.notifyEmpty) 1f else 0f
+        for (i in 0 until NOTIFY_SLOTS) {
+            snapshot[SystemVars.notifySlot(i + 1, "has")] =
+                if (i < notifyItems.size) 1f else 0f
+        }
         val steps = ExternalVars.stepsToday
         if (steps != null) snapshot[SystemVars.STEPS_TODAY] = steps
 
@@ -334,6 +372,18 @@ class SystemInputHub(
         snapshot[SystemVars.WEATHER_IS_DAY] = ExternalVars.weatherIsDay
         snapshot[SystemVars.WEATHER_UPDATED] = if (ExternalVars.weatherUpdatedMs == 0L) 999f
         else ((System.currentTimeMillis() - ExternalVars.weatherUpdatedMs) / 60_000L).toFloat()
+        // 多日预报：0=昨天 1=今天 2=明天 3=后天 4=大后天
+        for (i in 0 until SystemVars.WEATHER_DAY_NAMES.size) {
+            val pre = "sys.weather." + SystemVars.WEATHER_DAY_NAMES[i] + "."
+            snapshot[pre + "max"] = ExternalVars.weatherDayMax[i]
+            snapshot[pre + "min"] = ExternalVars.weatherDayMin[i]
+            snapshot[pre + "code"] = ExternalVars.weatherDayCode[i].toFloat()
+            snapshot[pre + "rain"] = ExternalVars.weatherDayRain[i]
+            snapshot[pre + "precip"] = ExternalVars.weatherDayPrecip[i]
+        }
+        snapshot[SystemVars.WEATHER_RAIN_SOON] = ExternalVars.weatherRainSoon
+        snapshot[SystemVars.WEATHER_RAIN_MM] = ExternalVars.weatherRainMm
+
         val bands = ExternalVars.audioBands
         for (i in 0 until 8) {
             // 命名 b1..b8：给创作者看的下标从 1 开始更自然
@@ -352,7 +402,30 @@ class SystemInputHub(
         texts[SystemVars.WEATHER_TEXT] = ExternalVars.weatherText
         texts[SystemVars.WEATHER_CITY] = ExternalVars.weatherCity
         texts[SystemVars.WEATHER_DISTRICT] = ExternalVars.weatherDistrict
-        texts[SystemVars.MEDIA_LYRIC] = ExternalVars.mediaLyric
+        for (i in 0 until SystemVars.WEATHER_DAY_NAMES.size) {
+            texts["sys.weather." + SystemVars.WEATHER_DAY_NAMES[i] + ".text"] =
+                ExternalVars.weatherDayText[i]
+        }
+        texts[SystemVars.WEATHER_SUNRISE] = ExternalVars.weatherSunrise
+        texts[SystemVars.WEATHER_SUNSET] = ExternalVars.weatherSunset
+        // 通知槽位文本：即使为空也写入键，避免模板里留下 "{sys.notify.1.title}" 这样的字面量
+        for (i in 0 until NOTIFY_SLOTS) {
+            val item = notifyItems.getOrNull(i)
+            val n = i + 1
+            texts[SystemVars.notifySlot(n, "app")] = item?.app ?: ""
+            texts[SystemVars.notifySlot(n, "title")] = item?.title ?: ""
+            texts[SystemVars.notifySlot(n, "text")] = item?.text ?: ""
+            texts[SystemVars.notifySlot(n, "time")] = item?.time ?: ""
+        }
+        // 进度条两端的时间：模板里没法做除法取整，所以在这里格式化成 mm:ss
+    fun fmt(ms: Long): String {
+        if (ms <= 0L) return "--:--"
+        val total = ms / 1000
+        return "%d:%02d".format(total / 60, total % 60)
+    }
+    texts[SystemVars.MEDIA_POS_TEXT] = fmt(ExternalVars.mediaPositionMs)
+    texts[SystemVars.MEDIA_DUR_TEXT] = fmt(ExternalVars.mediaDurationMs)
+    texts[SystemVars.MEDIA_LYRIC] = ExternalVars.mediaLyric
         texts[SystemVars.MEDIA_LYRIC_TRANS] = ExternalVars.mediaLyricTrans
         texts[SystemVars.MEDIA_LYRIC_NEXT] = ExternalVars.mediaLyricNext
 

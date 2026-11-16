@@ -86,6 +86,9 @@ class NotificationRelay : NotificationListenerService() {
 
         /** 壁纸服务调用：执行一次媒体控制。返回 false 表示当前没有可控的播放器。 */
         fun mediaCommand(command: String): Boolean = instance?.runCommand(command) ?: false
+
+    /** 按百分比跳转播放位置（0~100）。壁纸的进度条拖动就走这里。 */
+    fun mediaSeek(percent: Float): Boolean = instance?.seekTo(percent) ?: false
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -143,6 +146,11 @@ class NotificationRelay : NotificationListenerService() {
     }
 
     override fun onListenerDisconnected() {
+        // 断开 = 读不到通知栏真相。此时保留旧内容会误导（用户以为还有消息），直接清空
+        ExternalVars.notifyItems = emptyList()
+        ExternalVars.notifyEmpty = true
+        ExternalVars.notifyCount = 0
+        ExternalVars.bump()
         Log.i(TAG, "通知监听已断开")
         connected = false
         if (instance === this) instance = null
@@ -168,6 +176,34 @@ class NotificationRelay : NotificationListenerService() {
      *
      * 不检查命令合法性（解析期已经挡过一次），未知命令返回 false 而不是抛异常。
      */
+    /** 按百分比 seek：需要播放器给出 duration，否则无从换算。 */
+    private fun seekTo(percent: Float): Boolean {
+        val controller = controllers.values.firstOrNull { isPlaying(it) }
+            ?: controllers.values.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PAUSED }
+            ?: controllers.values.firstOrNull()
+            ?: run {
+                Log.d(TAG, "跳转跳过：没有活跃会话")
+                return false
+            }
+        // 时长不在 PlaybackState 里，得从 MediaMetadata 取（和 publishMetadata 保持一致）
+        val duration = controller.metadata?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+        if (duration <= 0L) {
+            Log.d(TAG, "跳转跳过：播放器没给时长")
+            return false
+        }
+        val controls = runCatching { controller.transportControls }.getOrNull() ?: return false
+        val position = (duration * (percent.coerceIn(0f, 100f) / 100f)).toLong()
+        val handled = runCatching { controls.seekTo(position); true }
+            .onFailure { Log.w(TAG, "跳转失败：${it.message}") }
+            .getOrDefault(false)
+        if (handled) {
+            Log.i(TAG, "跳转播放位置：${percent.toInt()}% → ${position}ms")
+            publishPosition()
+            ExternalVars.bump()
+        }
+        return handled
+    }
+
     private fun runCommand(command: String): Boolean {
         val controller = controllers.values.firstOrNull { isPlaying(it) }
             ?: controllers.values.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PAUSED }
@@ -207,15 +243,75 @@ class NotificationRelay : NotificationListenerService() {
         refresh()
     }
 
-    /** 重新统计条数、重建媒体会话订阅。 */
+    /** 重新统计条数、重建通知摘要与媒体会话订阅。 */
     private fun refresh() {
         runCatching {
-            val count = activeNotifications?.size ?: 0
-            ExternalVars.notifyCount = count
-            lastCount = count
+            val active = activeNotifications ?: emptyArray()
+            // 条数也按"过滤后"算：否则面板上写 23 条、实际只显示 4 行，数字和内容对不上
+            val visible = digestOf(active)
+            ExternalVars.notifyCount = visible.size
+            lastCount = active.size
+            ExternalVars.notifyItems = visible.take(NotifyDigest.MAX_LINES)
+            ExternalVars.notifyEmpty = visible.isEmpty()
         }
         runCatching { syncSessions() }
         ExternalVars.bump()
+    }
+
+    /**
+     * 把通知栏当前内容压成最多 4 条摘要。
+     *
+     * 数据来源就是 `activeNotifications` 这个快照，所以"通知栏清空 → 壁纸也清空"
+     * 是自动成立的，不需要额外记账。过滤与排序规则在 NotifyDigest 里（可单测）。
+     */
+    private fun digestOf(active: Array<StatusBarNotification>): List<NotifyDigest.Item> {
+        val now = System.currentTimeMillis()
+        val ranking = runCatching { currentRanking }.getOrNull()
+        val items = active.mapNotNull { sbn ->
+            runCatching {
+                val notification = sbn.notification ?: return@runCatching null
+                val extras = notification.extras ?: android.os.Bundle.EMPTY
+                val title = extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString().orEmpty()
+                var text = extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString().orEmpty()
+                if (text.isBlank()) {
+                    text = extras.getCharSequence(android.app.Notification.EXTRA_BIG_TEXT)?.toString().orEmpty()
+                }
+                if (text.isBlank()) {
+                    text = extras.getCharSequence(android.app.Notification.EXTRA_SUMMARY_TEXT)?.toString().orEmpty()
+                }
+                // Ranking 是 NotificationListenerService 的内部类，直接用就行
+                val rank = Ranking()
+                val hasRank = ranking?.getRanking(sbn.key, rank) == true
+                NotifyDigest.build(
+                    packageName = sbn.packageName,
+                    appLabel = appLabelOf(sbn.packageName),
+                    title = title,
+                    text = text,
+                    postTime = sbn.postTime,
+                    nowMs = now,
+                    isOngoing = sbn.isOngoing,
+                    isGroupSummary = (notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY) != 0,
+                    selfPackage = packageName,
+                    isClearable = sbn.isClearable,
+                    isForegroundService =
+                        (notification.flags and android.app.Notification.FLAG_FOREGROUND_SERVICE) != 0,
+                    importance = if (hasRank) rank.importance else 3,
+                    isMedia = notification.category == android.app.Notification.CATEGORY_TRANSPORT
+                )
+            }.getOrNull()
+        }
+        // 这里返回**全部**可显示项：条数要用它算，取前 4 条由调用方做
+        return NotifyDigest.digest(items, Int.MAX_VALUE)
+    }
+
+    /** 包名 → 应用显示名，带缓存（查包信息是 IO，不能在每次通知刷新里重复做）。 */
+    private val appLabelCache = HashMap<String, String>()
+
+    private fun appLabelOf(pkg: String): String = appLabelCache.getOrPut(pkg) {
+        runCatching {
+            val info = packageManager.getApplicationInfo(pkg, 0)
+            packageManager.getApplicationLabel(info).toString()
+        }.getOrDefault(pkg)
     }
 
     /** 取当前活跃的媒体会话并订阅回调；会话变化时重建。 */

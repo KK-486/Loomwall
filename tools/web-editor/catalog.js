@@ -101,6 +101,48 @@ const CATALOG = [
     implemented: true,
   },
   {
+    key: 'sys.notify.shown', kind: 'var', category: '系统', signature: 'sys.notify.shown',
+    placeholder: '{sys.notify.shown:0}', desc: '通知流里当前有几条（0~4）',
+    implemented: true,
+  },
+  {
+    key: 'sys.notify.empty', kind: 'var', category: '系统', signature: 'sys.notify.empty',
+    placeholder: '{sys.notify.empty:0}', desc: '通知栏是否为空（1=空，适合直接绑透明度）',
+    implemented: true,
+  },
+  // 第 1~4 条通知的字段：应用 / 发送人 / 正文 / 时间
+  ...(() => {
+    const out = [];
+    for (let n = 1; n <= 4; n++) {
+      out.push({
+        key: 'sys.notify.' + n + '.has', kind: 'var', category: '系统', signature: 'sys.notify.' + n + '.has',
+        placeholder: '{sys.notify.' + n + '.has:0}', desc: '第 ' + n + ' 条是否存在（1/0）',
+        implemented: true,
+      });
+      out.push({
+        key: 'sys.notify.' + n + '.app', kind: 'var', category: '系统', signature: 'sys.notify.' + n + '.app',
+        placeholder: '{sys.notify.' + n + '.app}', desc: '第 ' + n + ' 条的应用名（微信…）',
+        implemented: true,
+      });
+      out.push({
+        key: 'sys.notify.' + n + '.title', kind: 'var', category: '系统', signature: 'sys.notify.' + n + '.title',
+        placeholder: '{sys.notify.' + n + '.title}', desc: '第 ' + n + ' 条的发送人/标题',
+        implemented: true,
+      });
+      out.push({
+        key: 'sys.notify.' + n + '.text', kind: 'var', category: '系统', signature: 'sys.notify.' + n + '.text',
+        placeholder: '{sys.notify.' + n + '.text}', desc: '第 ' + n + ' 条的正文（已压成单行、最多 42 字）',
+        implemented: true,
+      });
+      out.push({
+        key: 'sys.notify.' + n + '.time', kind: 'var', category: '系统', signature: 'sys.notify.' + n + '.time',
+        placeholder: '{sys.notify.' + n + '.time}', desc: '第 ' + n + ' 条的时间（刚刚 / N 分 / HH:mm）',
+        implemented: true,
+      });
+    }
+    return out;
+  })(),
+  {
     key: 'sys.media.title', kind: 'var', category: '系统', signature: 'sys.media.title',
     placeholder: '{sys.media.title}', desc: '当前播放的歌曲名（需通知使用权）',
     implemented: true,

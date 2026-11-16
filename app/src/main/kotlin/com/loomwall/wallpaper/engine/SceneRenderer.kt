@@ -67,6 +67,7 @@ internal class SceneRenderer {
     private val textCache = TextTextureCache()
     private val imageCache = ImageTextureCache()
     private val pathCache = PathTextureCache()
+    private val appSlotCache = AppSlotTextureCache()
 
     /** 预设资源目录（`presets/active/resources`），由 RenderThread 在加载场景时设置。 */
     var resourcesDir: java.io.File? = null
@@ -198,7 +199,11 @@ internal class SceneRenderer {
         GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
 
         // 递归绘制：容器把自己的变换乘进矩阵，子节点因此跟着整组移动/缩放/旋转。
-        drawNode(scene.root, Mat2D.IDENTITY, overrides, vars, texts)
+        // 每帧从零开始累计：视差是"本帧的相对位移"，绝不能跨帧保留
+        parallaxAccX = 0f
+        parallaxAccY = 0f
+        parallaxLevel = 0
+        drawNode(scene.root, Mat2D.IDENTITY, overrides, vars, texts, 1f)
 
         // 选中框最后画，避免被后续元素盖住。
         if (selectedId != null) {
@@ -242,16 +247,21 @@ internal class SceneRenderer {
      * 整帧 throw 掉，画面全黑、日志只有一行堆栈，极难定位。现在改成跳过该节点
      * 并记一次日志，其它节点照常绘制。
      */
+    /**
+     * @param parentAlpha 祖先链上累积的透明度。容器把自身 opacity 乘进来再往下传，
+     *   这样"整组淡入淡出"才成立（预设里做面板开合动画靠的是这个）。
+     */
     private fun drawNode(
         node: SceneNode,
         parent: Mat2D,
         overrides: Map<String, NodeOverrides>,
         vars: Map<String, Float>,
-        texts: Map<String, String>
+        texts: Map<String, String>,
+        parentAlpha: Float
     ) {
         val scissorDepth = scissorStack.size
         try {
-            drawNodeInner(node, parent, overrides, vars, texts)
+            drawNodeInner(node, parent, overrides, vars, texts, parentAlpha)
         } catch (e: Throwable) {
             // 裁剪栈必须恢复到进入时的深度，否则后续节点的裁剪区域全错
             while (scissorStack.size > scissorDepth) popScissor()
@@ -268,16 +278,45 @@ internal class SceneRenderer {
      * 不受该节点自己的缩放/旋转影响，和网页编辑器的绘制顺序一致。
      * 位移单位是画布单位（与 x/y 同一套），所以编辑器里看到的幅度=手机上的幅度。
      */
+    // 当前父链已经施加的视差位移（画布单位）与所处容器层级（root = 0）。
+    private var parallaxAccX = 0f
+    private var parallaxAccY = 0f
+    private var parallaxLevel = 0
+
     private fun withParallax(parent: Mat2D, node: SceneNode, override: NodeOverrides?): Mat2D {
         val layer = frameParallaxMap[node.id]
-        val parallaxMoved = if (frameTiltX != 0f || frameTiltY != 0f) {
-            val resolved = resolveParallax(layer, frameParallax)
-            val off = resolved.offsetUnits(frameTiltX, frameTiltY)
-            if (off[0] != 0f || off[1] != 0f) parent.then(Mat2D.translate(off[0], off[1])) else parent
-        } else {
-            parent
+        if (frameTiltX == 0f && frameTiltY == 0f) {
+            parallaxAccX = 0f
+            parallaxAccY = 0f
+            parallaxLevel = 0
+            return parent.then(nodeMatrix(node, override))
         }
-        return parallaxMoved.then(nodeMatrix(node, override))
+
+        // 全局"一份"位移：所有跟随全局的层都用它，靠层级数放大
+        val step = resolveParallax(null, frameParallax).offsetUnits(frameTiltX, frameTiltY)
+        val isContainer = node is ContainerNode
+        val target: FloatArray = when {
+            // 显式独立视差：完全用自身景深与方向
+            layer != null && layer.custom -> {
+                val r = resolveParallax(layer, frameParallax)
+                if (r.enabled && r.depth > 0f) r.offsetUnits(frameTiltX, frameTiltY) else floatArrayOf(0f, 0f)
+            }
+            // 容器：每进一层多一份 → 嵌套越深位移越大
+            isContainer -> floatArrayOf(step[0] * (parallaxLevel + 1), step[1] * (parallaxLevel + 1))
+            // 叶子：直接挂在 root 上的用一份；在容器里的跟随容器（不额外叠加）
+            parallaxLevel == 0 -> step
+            else -> floatArrayOf(parallaxAccX, parallaxAccY)
+        }
+
+        // 只平移"相对父级"的差值，避免层层累加
+        val dx = target[0] - parallaxAccX
+        val dy = target[1] - parallaxAccY
+        parallaxAccX = target[0]
+        parallaxAccY = target[1]
+        if (isContainer) parallaxLevel += 1
+
+        val moved = if (dx != 0f || dy != 0f) parent.then(Mat2D.translate(dx, dy)) else parent
+        return moved.then(nodeMatrix(node, override))
     }
 
     private fun drawNodeInner(
@@ -285,8 +324,13 @@ internal class SceneRenderer {
         parent: Mat2D,
         overrides: Map<String, NodeOverrides>,
         vars: Map<String, Float>,
-        texts: Map<String, String>
+        texts: Map<String, String>,
+        parentAlpha: Float
     ) {
+        // 保存父级视差累计量：本节点画完要还原，否则兄弟节点会继承错误的偏移
+        val savedAccX = parallaxAccX
+        val savedAccY = parallaxAccY
+        val savedLevel = parallaxLevel
         if (!effectivelyVisible(node)) return
         val override = overrides[node.id]
 
@@ -294,9 +338,11 @@ internal class SceneRenderer {
             is ContainerNode -> {
                 // 根容器本身没有变换，子节点直接就是画布坐标
                 val world = if (node.isRoot) parent else withParallax(parent, node, override)
+                // 分组透明度：容器自身 opacity × 祖先累积值，传给它下面所有子节点
+                val groupAlpha = parentAlpha * composeAlpha(parentAlpha, node.opacity, override?.opacity)
                 if (!node.isRoot && node.background.a > 0f) {
                     useSolidProgram()
-                    val alpha = effectiveAlpha(node.opacity, override?.opacity)
+                    val alpha = groupAlpha
                     val c = node.background.modulatedBy(alpha)
                     val boxW = effWidth(node, override)
                     val boxH = effHeight(node, override)
@@ -308,11 +354,31 @@ internal class SceneRenderer {
                 // 裁剪子元素：等价 CSS 的 overflow: hidden。clip=false 可关掉。
                 val clipped = !node.isRoot && node.clip
                 if (clipped) pushScissor(world, effWidth(node, override), effHeight(node, override))
-                for (child in node.children) drawNode(child, world, overrides, vars, texts)
+                for (child in node.children) drawNode(child, world, overrides, vars, texts, groupAlpha)
                 if (clipped) popScissor()
             }
 
             is RectNode -> {
+                // 软件容器：整体光栅化成贴图（虚线 + 加号 / 图标 + 名字）
+                if (node.shape == ShapeKind.APPSLOT) {
+                    val texture = appSlotCache.textureFor(node, resourcesDir)
+                    if (texture != null) {
+                        useTextProgram()
+                        stageTexturedQuad(
+                            withParallax(parent, node, override),
+                            effWidth(node, override),
+                            effHeight(node, override)
+                        )
+                        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+                        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture.textureId)
+                        GLES20.glUniform1i(uTexture, 0)
+                        GLES20.glUniform1f(uTextAlpha, composeAlpha(parentAlpha, node.opacity, override?.opacity))
+                        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+                        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+                        return
+                    }
+                    // 光栅化失败时退回实心矩形，至少不会整块消失
+                }
                 if (node.shape == ShapeKind.PATH || node.gradient.isNotBlank() || node.feather > 0f || node.cornerRadius > 0f || node.mask.isNotBlank()) {
                     // SVG 路径可能有多条轮廓、带镂空，交给光栅化贴图（Canvas 的 even-odd 填充）。
                     // 三角扇画不了这种形状，硬画只会得到包围盒方块。
@@ -327,7 +393,7 @@ internal class SceneRenderer {
                         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
                         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture.textureId)
                         GLES20.glUniform1i(uTexture, 0)
-                        val alpha = effectiveAlpha(node.opacity, override?.opacity)
+                        val alpha = composeAlpha(parentAlpha, node.opacity, override?.opacity)
                         GLES20.glUniform1f(uTextAlpha, alpha)
                         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
                         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
@@ -342,7 +408,7 @@ internal class SceneRenderer {
                 val boxH = effHeight(node, override)
                 val points = Shapes.points(node.shape, node.sides, boxW, boxH)
                 val fanCount = stageFan(world, points, boxW / 2f, boxH / 2f)
-                val alpha = effectiveAlpha(node.opacity, override?.opacity)
+                val alpha = composeAlpha(parentAlpha, node.opacity, override?.opacity)
                 val c = node.color.modulatedBy(alpha)
                 GLES20.glUniform4f(uColor, c.r, c.g, c.b, c.a)
                 GLES20.glDrawArrays(GLES20.GL_TRIANGLE_FAN, 0, fanCount)
@@ -350,14 +416,17 @@ internal class SceneRenderer {
 
             is TextNode -> {
                 useTextProgram()
-                drawTextNode(node, override, vars, texts, withParallax(parent, node, override))
+                drawTextNode(node, override, vars, texts, withParallax(parent, node, override), parentAlpha)
             }
 
             is ImageNode -> {
                 useTextProgram()
-                drawImageNode(node, override, withParallax(parent, node, override))
+                drawImageNode(node, override, withParallax(parent, node, override), parentAlpha)
             }
         }
+        parallaxAccX = savedAccX
+        parallaxAccY = savedAccY
+        parallaxLevel = savedLevel
     }
 
     /** 节点在**父坐标系**里的变换：先平移到位置，再绕自身（缩放后的）中心缩放+旋转。 */
@@ -368,6 +437,15 @@ internal class SceneRenderer {
      * 相乘的写法看起来更"保守"，但会让"把本来是透明的元素显示出来"永远失败
      *（0 × 任何值 = 0），真机表现就是"点了没反应"——这个 bug 踩过一次。
      */
+    /**
+     * 祖先 alpha × 自身 alpha。
+     *
+     * 单独抽出来是为了能单测：容器的 opacity 必须级联到子节点，
+     * 否则"整组淡入淡出"在画面上等于没做（子节点各自全不透明）。
+     */
+    internal fun composeAlpha(parentAlpha: Float, nodeOpacity: Float, overrideOpacity: Float?): Float =
+        (parentAlpha * effectiveAlpha(nodeOpacity, overrideOpacity)).coerceIn(0f, 1f)
+
     internal fun effectiveAlpha(nodeOpacity: Float, overrideOpacity: Float?): Float =
         (overrideOpacity ?: nodeOpacity).coerceIn(0f, 1f)
 
@@ -528,7 +606,18 @@ internal class SceneRenderer {
         overrides: Map<String, NodeOverrides> = emptyMap()
     ): String? {
         if (scene == null || !scene.root.visible) return null
-        return hitNode(scene.root, Mat2D.IDENTITY, x, y, overrides, scene.hitThroughIds)
+        // hitNode 内部同样会调用 withParallax，会改写 parallaxAcc；
+        // 不还原的话，点击一次之后所有后续帧都会带着这个残值，画面整体偏移。
+        val savedAccX = parallaxAccX
+        val savedAccY = parallaxAccY
+        parallaxAccX = 0f
+        parallaxAccY = 0f
+        parallaxLevel = 0
+        val hit = hitNode(scene.root, Mat2D.IDENTITY, x, y, overrides, scene.hitThroughIds)
+        parallaxAccX = savedAccX
+        parallaxAccY = savedAccY
+        parallaxLevel = 0
+        return hit
     }
 
     private fun hitNode(
@@ -599,7 +688,8 @@ internal class SceneRenderer {
         override: NodeOverrides?,
         vars: Map<String, Float>,
         texts: Map<String, String>,
-        world: Mat2D
+        world: Mat2D,
+        parentAlpha: Float
     ) {
         val rendered = TextTemplate.render(node.text, vars, texts = texts)
         val texture = textCache.textureFor(node, rendered, surfaceWidth) ?: return
@@ -609,14 +699,14 @@ internal class SceneRenderer {
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture.textureId)
         GLES20.glUniform1i(uTexture, 0)
-        val alpha = effectiveAlpha(node.opacity, override?.opacity)
+        val alpha = composeAlpha(parentAlpha, node.opacity, override?.opacity)
         GLES20.glUniform1f(uTextAlpha, alpha)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
     }
 
     /** 图片：解码成纹理后按普通元素变换贴上屏幕。 */
-    private fun drawImageNode(node: ImageNode, override: NodeOverrides?, world: Mat2D) {
+    private fun drawImageNode(node: ImageNode, override: NodeOverrides?, world: Mat2D, parentAlpha: Float) {
                 // feather 是"占元素宽度的百分比"，直接交给缓存换算成纹理像素
                 val texture = imageCache.textureFor(
             node.src, resourcesDir, node.feather,
@@ -629,7 +719,7 @@ internal class SceneRenderer {
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture.textureId)
         GLES20.glUniform1i(uTexture, 0)
-        GLES20.glUniform1f(uTextAlpha, effectiveAlpha(node.opacity, override?.opacity))
+        GLES20.glUniform1f(uTextAlpha, composeAlpha(parentAlpha, node.opacity, override?.opacity))
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
     }
@@ -789,6 +879,7 @@ internal class SceneRenderer {
         textCache.release()
         imageCache.release()
         pathCache.release()
+        appSlotCache.release()
         isReady = false
     }
 

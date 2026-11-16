@@ -194,6 +194,17 @@
   .field.section-title > label { color: #9fb3c8; font-weight: 600; letter-spacing: .3px; }
 
   .inspector { padding: 6px 0 16px; overflow-x: hidden; overflow-y: auto; }
+/* 属性区固定约 38vh 并内部滚动：默认能看见"位置/宽高/缩放"这一段，
+   旋转及以下用滚轮往下看。不给上限的话内容会把下面的变量/函数顶出屏幕。 */
+.col.right > .section.props {
+  flex: 0 0 auto;
+  height: 38vh;
+  min-height: 230px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.col.right > .section.props > #inspector { flex: 1 1 auto; min-height: 0; }
   .col.right { display: flex; flex-direction: column; min-height: 0; }
   #inspector { flex: 1 1 auto; min-height: 0; }
   .icon-btn { width: 24px; min-width: 24px; height: 22px; padding: 0; line-height: 1; font-size: 12px; }
@@ -306,7 +317,7 @@
 /* ---- 中：画布 ---- */
 .studio-main { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #070b11; }
 .studio-canvas { position: absolute; inset: 0; overflow: hidden; }
-.studio-playfield { position: absolute; left: 0; top: 0; width: 4000px; height: 3000px;
+.studio-playfield { position: absolute; left: 0; top: 0; width: 20000px; height: 20000px;
   transform-origin: 0 0;
   background-image: radial-gradient(circle, #131d29 1px, transparent 1px);
   background-size: 24px 24px; }
@@ -544,6 +555,7 @@
   <button id="btn-export-bundle" class="primary" title="手机端「导入预设」就选这个文件">导出预设（单文件·手机用）</button>
   <button id="btn-export-files" title="给预设文件夹 / KLWP 风格包结构用，手机导入不需要">导出 3 个 JSON</button>
   <input id="phone-addr" placeholder="手机地址 192.168.x.x:8765" title="打开手机上的 LOOW，抽屉里会显示这个地址" style="width:170px" />
+  <button id="btn-usb" title="用数据线连接（手机需开启 USB 调试）。没网也能传">USB 连接</button>
   <button id="btn-send-phone" class="primary">发送到手机</button>
   <span class="badge" id="phone-state">未连接手机</span>
   <span class="spacer"></span>
@@ -638,6 +650,7 @@
       </div>
       <div id="add-menu" class="add-menu">
         <button data-add="shape">形状…</button>
+        <button data-add="appslot" title="虚线框 + 加号；手机上点它选应用">软件容器</button>
         <button data-add="container">容器</button>
         <button data-add="image">图片</button>
         <button data-add="text">文本</button>
@@ -699,7 +712,7 @@
   </section>
 
   <aside class="col right">
-    <div class="section">
+    <div class="section props">
       <div class="hd">属性</div>
       <div class="inspector scroll" id="inspector"></div>
     </div>
@@ -707,7 +720,7 @@
       <div class="hd">校验</div>
       <div id="errors"></div>
     </div>
-    <div class="section" style="flex:0 0 auto;display:flex;flex-direction:column;min-height:200px;max-height:38vh">
+    <div class="section" style="flex:0 0 auto;display:flex;flex-direction:column;min-height:120px;max-height:24vh">
       <div class="hd">交互（触摸事件）
         <span class="spacer"></span>
         <button id="btn-add-toggle">+ 点击切换</button>
@@ -726,7 +739,7 @@
       </div>
       <div id="binding-list" class="scroll" style="flex:1;padding:6px 8px 8px"></div>
     </div>
-    <div class="section" style="flex:1 1 auto;display:flex;flex-direction:column;min-height:240px">
+    <div class="section" style="flex:1 1 auto;display:flex;flex-direction:column;min-height:190px">
       <div class="hd">变量 / 函数
         <span class="spacer"></span>
         <span class="badge" id="insert-target">插入目标：未选中文本</span>
@@ -735,6 +748,8 @@
         <input id="var-search" placeholder="搜索：电量 / 时间 / 电池 / 内存…" style="width:100%" />
       </div>
       <div id="var-cats" style="padding:0 8px 4px;display:flex;flex-wrap:wrap;gap:4px"></div>
+      <div id="var-my" style="padding:0 8px 2px;max-height:32%;overflow:auto"></div>
+      <div id="fn-my" style="padding:0 8px 2px;max-height:22%;overflow:auto"></div>
       <div id="var-list" class="scroll" style="flex:1;padding:0 8px 8px"></div>
     </div>
   </aside>
@@ -796,7 +811,8 @@
         </div>
 
         <div class="st-zoomdock">
-          <button data-studio-zoom="out">−</button>
+          <button id="studio-fit" title="缩放到全部节点">⤢</button>
+<button data-studio-zoom="out">−</button>
           <span id="studio-zoom-label">100%</span>
           <button data-studio-zoom="in">+</button>
         </div>
@@ -826,6 +842,9 @@
               <option value="tap">单击</option>
               <option value="doubleTap">双击</option>
               <option value="longPress">长按</option>
+  <option value="press">按下</option>
+  <option value="hold">按住 5 秒</option>
+  <option value="release">松手</option>
           </select>
           </div>
           <div class="st-sim-row">
@@ -891,10 +910,29 @@
     </div>
   </div>
 </div>
-<script src="catalog.js?v=20261107v102rel"></script>
+<!-- 通用询问弹窗：新变量命名 / 删除前确认引用 -->
+<div class="st-modal" id="ask-modal" hidden>
+  <div class="st-modal-backdrop" id="ask-backdrop"></div>
+  <div class="st-modal-card" style="width:min(420px,88vw);max-height:none">
+    <div class="st-modal-head">
+      <strong id="ask-title">提示</strong>
+      <span class="st-modal-meta" id="ask-meta"></span>
+    </div>
+    <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
+      <div id="ask-msg" style="font-size:13px;color:#c9d6e4;line-height:1.5"></div>
+      <input id="ask-input" type="text" style="width:100%;box-sizing:border-box" />
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:2px">
+        <button id="ask-cancel">取消</button>
+        <button id="ask-ok" class="primary">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="catalog.js?v=20261112v104"></script>
 <!-- 工作台与编译层都要先于 editor.js：editor.js 末尾会调用 setupStudio() / setupStudioCompile() -->
-<script src="studio.js?v=20261107v102rel"></script>
-<script src="studio-compile.js?v=20261107v102rel"></script>
-<script src="editor.js?v=20261107v102rel"></script>
+<script src="studio.js?v=20261112v104"></script>
+<script src="studio-compile.js?v=20261112v104"></script>
+<script src="studio-import.js?v=20261112v104"></script>
+<script src="editor.js?v=20261112v104"></script>
 </body>
 </html>

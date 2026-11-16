@@ -56,6 +56,25 @@ interface RuleEffects {
      * 默认空实现：老代码 / 测试里的假实现不必跟着改，只有真正接媒体的那一层覆盖它。
      */
     fun mediaControl(command: String) {}
+
+    /**
+     * 设置屏幕亮度（0..100）。
+     *
+     * 需要「修改系统设置」特殊权限；没授权时实现方只打日志，不能崩。
+     */
+    fun setBrightness(percent: Float) {}
+
+    /** 设置媒体音量（0..100）。 */
+    fun setVolume(percent: Float) {}
+
+    /** 跳转播放位置（0~100）。 */
+    fun mediaSeek(percent: Float) {}
+
+    /** 打开系统快捷面板（能直接看到 WiFi/蓝牙开关）。 */
+    fun openSystemPanel(panel: String) {}
+
+    /** 跳转到系统设置详情页。 */
+    fun openSystemSettings(page: String) {}
 }
 
 class RuleRuntime(
@@ -64,8 +83,61 @@ class RuleRuntime(
     /** 系统变量读取：sys.time.hour / sys.battery.level …，未知返回 null。 */
     private val systemVar: (String) -> Float? = { null },
     private val textVar: (String) -> String? = { null },
-    private val randomSource: () -> Float = { kotlin.random.Random.nextFloat() }
+    private val randomSource: () -> Float = { kotlin.random.Random.nextFloat() },
+    /**
+     * 变量持久化。null = 全部不落盘（测试与旧调用点不受影响）。
+     * 只有 `RuleVar.persist = true` 的变量才会走这里。
+     */
+    private val persistence: VarPersistence? = null
 ) {
+
+    /** 待执行的延迟显隐：同一目标只保留最后一次，避免排队互顶。 */
+    private class PendingVisible(val targetId: String, val visible: Boolean, val dueAtMs: Long)
+
+    private val pendingVisible = LinkedHashMap<String, PendingVisible>()
+
+    /** 登记一次延迟显隐（同一目标覆盖旧任务）。 */
+    private fun scheduleVisible(targetId: String, visible: Boolean, delayMs: Int) {
+        pendingVisible[targetId] = PendingVisible(
+            targetId,
+            visible,
+            System.currentTimeMillis() + delayMs
+        )
+    }
+
+    /**
+     * 由渲染线程每帧调用：执行到期的延迟显隐。
+     *
+     * @param nowMs 传入当前时间便于单测（默认取系统时间）。用 currentTimeMillis 而不是
+     *   nanoTime，是因为延迟量级是几百毫秒，不需要纳秒精度。
+     */
+    fun pumpDelayed(nowMs: Long = System.currentTimeMillis()) {
+        if (pendingVisible.isEmpty()) return
+        val due = pendingVisible.values.filter { it.dueAtMs <= nowMs }
+        if (due.isEmpty()) return
+        due.forEach { pendingVisible.remove(it.targetId) }
+        beginTrigger()
+        due.forEach { effects.setVisible(it.targetId, it.visible) }
+    }
+
+    /** 壁纸不可见时调用：延迟任务不该跨可见期存活。 */
+    fun clearDelayed() {
+        pendingVisible.clear()
+    }
+
+    /** 还有没有延迟任务（渲染线程据此决定要不要继续画帧）。 */
+    fun hasDelayedWork(): Boolean = pendingVisible.isNotEmpty()
+
+    /** 距离最早一条延迟任务到期还有多久（毫秒）；没有则 Long.MAX_VALUE。 */
+    fun nextDelayedDelay(nowMs: Long): Long {
+        if (pendingVisible.isEmpty()) return Long.MAX_VALUE
+        val earliest = pendingVisible.values.minOf { it.dueAtMs }
+        return (earliest - nowMs).coerceAtLeast(0L)
+    }
+
+    /** 是否有已到期的延迟任务（渲染线程据此主动出一帧）。 */
+    fun hasDueDelayed(nowMs: Long): Boolean =
+        pendingVisible.values.any { it.dueAtMs <= nowMs }
 
     /** 变量当前值。key 不带任何前缀，规则里直接写名字。 */
     private val vars = LinkedHashMap<String, Float>()
@@ -101,8 +173,40 @@ class RuleRuntime(
     var budgetExceeded = 0
         private set
 
+    /** 需要落盘的变量名：只在 init 里算一次。 */
+    private val persistedNames: Set<String> =
+        model.vars.filter { it.persist }.map { it.name }.toSet()
+
+    /** 本次启动从磁盘恢复了真实值的变量：需要补跑一次依赖它们的规则。 */
+    private val restoredVars = LinkedHashSet<String>()
+
     init {
+        // 先铺预设初值，再用上次落盘的值覆盖 —— 文件不存在时等于没覆盖
         model.vars.forEach { vars[it.name] = it.value }
+        if (persistedNames.isNotEmpty()) {
+            val stored = persistence?.load().orEmpty()
+            for (name in persistedNames) {
+                val v = stored[name] ?: continue
+                val def = model.vars.first { it.name == name }
+                vars[name] = v.coerceIn(def.min, def.max)
+                restoredVars.add(name)
+            }
+        }
+    }
+
+    /**
+     * 启动时把"恢复出来的变量"当成一次变化补跑一遍。
+     *
+     * 为什么必须补：`var` 触发的规则只在变量**变化**时执行。如果只把值读回来而不跑规则，
+     * 界面就会停在预设初值的状态（例如软件容器：值恢复到 5，但格子仍只显示 1 个），
+     * 表现就是"设置没生效"。这里在加载完成后主动级联一次，让规则把界面补到正确状态。
+     */
+    fun applyRestoredState() {
+        if (restoredVars.isEmpty()) return
+        beginTrigger()
+        pendingVarChanges.addAll(restoredVars)
+        flushCascade()
+        restoredVars.clear()
     }
 
     companion object {
@@ -273,7 +377,14 @@ class RuleRuntime(
                 is RuleAction.SetVisible -> {
                     val target = substitute(action.targetId, args)
                     val visible = action.expr?.let { evalText(it, "/expr") > 0.5f } ?: action.value
-                    effects.setVisible(target, visible)
+                    if (action.delayMs > 0) {
+                        scheduleVisible(target, visible, action.delayMs)
+                    } else {
+                        // 立即生效时清掉同一目标的延迟任务：
+                        // 否则"关闭→立刻重新打开"会被 200ms 前的隐藏任务顶掉
+                        pendingVisible.remove(target)
+                        effects.setVisible(target, visible)
+                    }
                 }
                 is RuleAction.SetProperty -> {
                     val target = substitute(action.targetId, args)
@@ -291,7 +402,21 @@ class RuleRuntime(
                 is RuleAction.PlayAnimation -> effects.playAnimation(action.clipId, action.reverse)
                 is RuleAction.LaunchApp -> effects.launchApp(action.packageName)
                 is RuleAction.OpenUri -> effects.openUri(action.uri)
-                is RuleAction.MediaControl -> effects.mediaControl(action.command)
+                is RuleAction.SetBrightness -> {
+                val v = evalText((action as RuleAction.SetBrightness).expr, "/brightness")
+                effects.setBrightness(v.coerceIn(0f, 100f))
+            }
+            is RuleAction.SetVolume -> {
+                val v = evalText((action as RuleAction.SetVolume).expr, "/volume")
+                effects.setVolume(v.coerceIn(0f, 100f))
+            }
+            is RuleAction.MediaSeek -> {
+                val v = evalText((action as RuleAction.MediaSeek).expr, "/seek")
+                effects.mediaSeek(v.coerceIn(0f, 100f))
+            }
+            is RuleAction.OpenPanel -> effects.openSystemPanel(action.panel)
+            is RuleAction.OpenSettings -> effects.openSystemSettings(action.page)
+            is RuleAction.MediaControl -> effects.mediaControl(action.command)
                 is RuleAction.CallFunction -> callFunction(action, depth, loopDepth)
                 is RuleAction.ForLoop -> runForLoop(action, args, depth, loopDepth)
                 is RuleAction.WhileLoop -> runWhileLoop(action, args, depth, loopDepth)
@@ -410,6 +535,10 @@ class RuleRuntime(
     private fun applySetVar(name: String, value: Float) {
         vars[name] = value
         pendingVarChanges.add(name)
+        // 只把标了 persist 的变量交给持久化层；实现方负责合并写、异步落盘
+        if (name in persistedNames) {
+            runCatching { persistence?.save(name, value) }
+        }
     }
 
     /** 待处理的变量变化：级联到 var 触发器规则。 */
@@ -421,6 +550,37 @@ class RuleRuntime(
      * 为什么需要上限：规则 A 改 x、规则 x 又改 A，天然会绕圈。
      * 这里最多迭代 [MAX_CASCADE_PASSES] 轮，超出后停止并计数（不崩、不死循环）。
      */
+    /**
+     * 拖拽事件：把 [0,1] 的横向位置换算成 0..100 写进变量，再跑该拖动区的规则。
+     *
+     * 之所以"先写变量再跑规则"：滑条预设只需要一条 `drag → brightness(变量)`，
+     * 不需要额外的中间变量规则；同时变量变化也会级联，其它想读它的规则自动生效。
+     */
+    /** 这个拖动区配的是横轴还是纵轴（默认横轴）。 */
+    fun dragAxisOf(targetId: String): String {
+        val rule = model.rules.firstOrNull {
+            val t = it.trigger
+            t is RuleTrigger.Drag && t.targetId == targetId
+        } ?: return "x"
+        return (rule.trigger as RuleTrigger.Drag).axis
+    }
+
+    fun onDrag(targetId: String, fraction: Float): Int {
+        val matched = model.rules.filter {
+            val t = it.trigger
+            t is RuleTrigger.Drag && t.targetId == targetId
+        }
+        if (matched.isEmpty()) return 0
+        val percent = (fraction.coerceIn(0f, 1f) * 100f)
+        for (rule in matched) {
+            val t = rule.trigger as RuleTrigger.Drag
+            applySetVar(t.varName, percent)
+        }
+        val executed = runRules(matched)
+        flushCascade()
+        return executed
+    }
+
     private fun flushCascade() {
         var pass = 0
         while (pendingVarChanges.isNotEmpty() && pass < MAX_CASCADE_PASSES) {

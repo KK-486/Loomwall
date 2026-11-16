@@ -20,8 +20,11 @@ namespace LoomwallEditor
 {
     internal static class Program
     {
-        private const int Port = 3009;
-        private const string Url = "http://127.0.0.1:3009/";
+        // 首选端口；被占用时自动往后试（残留的僵尸监听很常见）
+        private const int PreferredPort = 3009;
+        private const int PortScanCount = 11;
+        private static int _port = PreferredPort;
+        private static string Url { get { return "http://127.0.0.1:" + _port + "/"; } }
 
         private static readonly Dictionary<string, string> MimeTypes =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -81,15 +84,29 @@ namespace LoomwallEditor
                 return 1;
             }
 
-            TcpListener listener = new TcpListener(IPAddress.Loopback, Port);
-            try
+            TcpListener listener = null;
+            SocketException lastError = null;
+            for (int p = PreferredPort; p < PreferredPort + PortScanCount; p++)
             {
-                listener.Start();
+                try
+                {
+                    var candidate = new TcpListener(IPAddress.Loopback, p);
+                    candidate.Start();
+                    listener = candidate;
+                    _port = p;
+                    if (p != PreferredPort) SafeWrite("端口 " + PreferredPort + " 被占用，改用 " + p);
+                    break;
+                }
+                catch (SocketException e)
+                {
+                    lastError = e;
+                }
             }
-            catch (SocketException e)
+            if (listener == null)
             {
-                SafeWrite("端口 " + Port + " 启动失败：" + e.Message);
-                SafeWrite("用 netstat -ano | findstr :" + Port + " 看看是谁占着。");
+                SafeWrite("端口 " + PreferredPort + ".." + (PreferredPort + PortScanCount - 1) + " 都被占用：" +
+                          (lastError != null ? lastError.Message : "未知原因"));
+                SafeWrite("用 netstat -ano | findstr :" + PreferredPort + " 看看是谁占着。");
                 Pause();
                 return 1;
             }
@@ -140,8 +157,19 @@ namespace LoomwallEditor
                     string rawPath = parts[1];
 
                     int q = rawPath.IndexOf('?');
+                    string query = q >= 0 ? rawPath.Substring(q + 1) : "";
                     if (q >= 0) rawPath = rawPath.Substring(0, q);
                     string path = Uri.UnescapeDataString(rawPath);
+
+                    // USB 连接：浏览器不能调 adb，由这里代跑 forward
+                    if (path.StartsWith("/adb/", StringComparison.Ordinal))
+                    {
+                        string json = HandleAdb(path, query);
+                        WriteResponse(stream, 200, "application/json; charset=utf-8",
+                            Encoding.UTF8.GetBytes(json), method == "HEAD");
+                        return;
+                    }
+
                     if (path == "/" || path.Length == 0) path = "/index.html";
                     string key = path.TrimStart('/').Replace('\\', '/');
 
@@ -166,6 +194,309 @@ namespace LoomwallEditor
             {
                 try { client.Close(); } catch { }
             }
+        }
+
+        // ---------------------------------------------------------------- ADB（USB）
+
+        /// <summary>找 adb.exe：环境变量 → SDK 默认位置 → exe 同目录 → PATH。</summary>
+        /// <summary>
+        /// 找 adb.exe。
+        ///
+        /// 为什么候选这么多：从资源管理器双击启动的进程拿不到开发机的 PATH，
+        /// 而用户电脑上 adb 可能只在 Android Studio 的 SDK 目录里。按以下顺序试：
+        /// LOOW_ADB/ADB 环境变量 → EXE 同目录的 adb-path.txt → 同目录 platform-tools
+        /// → 上级目录的 .toolchain SDK（仓库内开发）→ SDK 默认安装位置 → PATH。
+        /// </summary>
+        private static string FindAdb()
+        {
+            var cands = new List<string>();
+            string a1 = Environment.GetEnvironmentVariable("LOOW_ADB");
+            if (!string.IsNullOrEmpty(a1)) cands.Add(a1);
+            string a2 = Environment.GetEnvironmentVariable("ADB");
+            if (!string.IsNullOrEmpty(a2)) cands.Add(a2);
+
+            string exeDir = Path.GetDirectoryName(typeof(Program).Assembly.Location);
+            if (!string.IsNullOrEmpty(exeDir))
+            {
+                // 用户可把路径写进 adb-path.txt（第一行）
+                try
+                {
+                    string cfg = Path.Combine(exeDir, "adb-path.txt");
+                    if (File.Exists(cfg))
+                    {
+                        string line = File.ReadAllLines(cfg)[0].Trim();
+                        if (line.Length > 0) cands.Add(Directory.Exists(line) ? Path.Combine(line, "adb.exe") : line);
+                    }
+                }
+                catch { }
+
+                cands.Add(Path.Combine(exeDir, "platform-tools", "adb.exe"));
+                cands.Add(Path.Combine(exeDir, "adb.exe"));
+                cands.Add(Path.GetFullPath(Path.Combine(exeDir, "..", ".toolchain", "android-sdk", "platform-tools", "adb.exe")));
+                cands.Add(Path.GetFullPath(Path.Combine(exeDir, "..", "..", ".toolchain", "android-sdk", "platform-tools", "adb.exe")));
+                cands.Add(Path.GetFullPath(Path.Combine(exeDir, "..", "tools", "platform-tools", "adb.exe")));
+            }
+
+            string androidHome = Environment.GetEnvironmentVariable("ANDROID_HOME");
+            if (!string.IsNullOrEmpty(androidHome))
+                cands.Add(Path.Combine(androidHome, "platform-tools", "adb.exe"));
+            string sdkRoot = Environment.GetEnvironmentVariable("ANDROID_SDK_ROOT");
+            if (!string.IsNullOrEmpty(sdkRoot))
+                cands.Add(Path.Combine(sdkRoot, "platform-tools", "adb.exe"));
+            string localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+            if (!string.IsNullOrEmpty(localAppData))
+                cands.Add(Path.Combine(localAppData, "Android", "Sdk", "platform-tools", "adb.exe"));
+            cands.Add(@"C:\Android\platform-tools\adb.exe");
+            cands.Add(@"C:\Program Files\Android\platform-tools\adb.exe");
+            cands.Add("adb");
+
+            foreach (string c in cands)
+            {
+                if (string.IsNullOrEmpty(c)) continue;
+                try
+                {
+                    var r = RunProcess(c, "version", 4000);
+                    if (r.Item1 == 0) return c;
+                }
+                catch { /* 试下一个 */ }
+            }
+            return null;
+        }
+
+        /// <summary>跑一个进程，返回 (退出码, stdout, stderr)；超时直接杀掉。</summary>
+        /// <summary>当前使用的 adb 服务端口；null = 用 adb 默认值（5037）。</summary>
+        private static string _adbServerPort;
+        /// <summary>最近一次端口扫描的过程（诊断用）。</summary>
+        private static string _adbTrace = "";
+
+        /// <summary>
+        /// 候选端口（null = adb 默认 5037）。
+        /// 为什么要扫：5037 被别的程序占用时，adb 客户端"连得上但设备列表为空"，
+        /// 而设备可能挂在另一个端口的服务上 —— 必须挑一个真能看到设备的。
+        /// </summary>
+        private static readonly string[] AdbServerPortCandidates = { null, "15037", "15038", "15039" };
+
+        /// <summary>输出里是否出现一台状态为 device 的设备。</summary>
+        private static bool HasDevice(Tuple<int, string, string> r)
+        {
+            string[] lines = (r.Item2 ?? "").Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string raw in lines)
+            {
+                string line = raw.Trim();
+                if (line.Length == 0) continue;
+                if (line.StartsWith("List of devices", StringComparison.OrdinalIgnoreCase)) continue;
+                if (line.StartsWith("*", StringComparison.Ordinal)) continue;
+                // 形如 "65cb411f  device product:umi ... transport_id:2"：
+                // 状态在第二个字段，行尾并不是 device
+                string[] parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2 && parts[1] == "device") return true;
+            }
+            return false;
+        }
+
+        /// <summary>挑一个能看到设备的 adb 服务端口；都没有设备就返回第一个能连上的。</summary>
+        private static string ResolveAdbPort(string adb)
+        {
+            var trace = new System.Text.StringBuilder();
+            string firstOk = null;
+            bool firstOkSet = false;
+            foreach (string port in AdbServerPortCandidates)
+            {
+                var r = RunProcess(adb, "devices -l", 8000, port);
+                trace.Append("[" + (port ?? "def") + "] exit=" + r.Item1 +
+                             " out=" + ((r.Item2 ?? "").Replace("\n", "/").Replace("\r", "").Trim()) +
+                             " err=" + ((r.Item3 ?? "").Replace("\n", "/").Replace("\r", "").Trim()) + " ;; ");
+                _adbTrace = trace.ToString();
+                if (IsDaemonFailure(r)) continue;
+                if (!firstOkSet) { firstOk = port; firstOkSet = true; }
+                if (HasDevice(r))
+                {
+                    _adbServerPort = port;
+                    return port;
+                }
+            }
+            _adbServerPort = firstOk;
+            return firstOk;
+        }
+
+        private static bool IsDaemonFailure(Tuple<int, string, string> r)
+        {
+            string text = ((r.Item2 ?? "") + "\n" + (r.Item3 ?? "")).ToLowerInvariant();
+            return text.Contains("cannot connect to daemon")
+                || text.Contains("could not read ok from adb server")
+                || text.Contains("failed to start daemon")
+                || text.Contains("cannot connect to daemon");
+        }
+
+        /// <summary>
+        /// 跑 adb，并在"连不上守护进程"时自动换一个服务端口重试。
+        /// 为什么要这样：adb 客户端与服务端靠一个本地端口通信，默认 5037；
+        /// 该端口被别的程序占用时，客户端只会打印 cannot connect to daemon，
+        /// 用户完全看不出是端口冲突。
+        /// </summary>
+        private static Tuple<int, string, string> RunAdb(string adb, string args, int timeoutMs)
+        {
+            var first = RunProcess(adb, args, timeoutMs, _adbServerPort);
+            if (!IsDaemonFailure(first)) return first;
+            if (_adbServerPort != null) return first;
+
+            foreach (string port in AdbServerPortCandidates)
+            {
+                var retry = RunProcess(adb, args, timeoutMs, port);
+                if (!IsDaemonFailure(retry))
+                {
+                    _adbServerPort = port;
+                    SafeWrite("adb 默认端口不可用，已改用 " + port);
+                    return retry;
+                }
+            }
+            return first;
+        }
+
+        private static Tuple<int, string, string> RunProcess(string file, string args, int timeoutMs)
+        {
+            return RunProcess(file, args, timeoutMs, null);
+        }
+
+        private static Tuple<int, string, string> RunProcess(string file, string args, int timeoutMs, string adbServerPort)
+        {
+            var psi = new ProcessStartInfo(file, args)
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
+            };
+            if (!string.IsNullOrEmpty(adbServerPort))
+            {
+                psi.EnvironmentVariables["ANDROID_ADB_SERVER_PORT"] = adbServerPort;
+            }
+            using (var p = Process.Start(psi))
+            {
+                string stdout = p.StandardOutput.ReadToEnd();
+                string stderr = p.StandardError.ReadToEnd();
+                if (!p.WaitForExit(timeoutMs))
+                {
+                    try { p.Kill(); } catch { }
+                    return Tuple.Create(-1, stdout, "adb 超时（" + timeoutMs + "ms）");
+                }
+                return Tuple.Create(p.ExitCode, stdout, stderr);
+            }
+        }
+
+        private static string JsonEscape(string s)
+        {
+            if (s == null) return "";
+            var sb = new StringBuilder();
+            foreach (char c in s)
+            {
+                if (c == '"' || c == 92) { sb.Append((char)92); sb.Append(c); }
+                else if (c == 10) { sb.Append((char)92); sb.Append('n'); }
+                else if (c == 13) { }
+                else if (c == 9) { sb.Append(' '); }
+                else if (c < 32) { sb.Append(' '); }
+                else { sb.Append(c); }
+            }
+            return sb.ToString();
+        }
+
+        private static string QueryValue(string query, string key, string fallback)
+        {
+            foreach (string pair in (query ?? "").Split('&'))
+            {
+                int eq = pair.IndexOf('=');
+                if (eq <= 0) continue;
+                if (pair.Substring(0, eq) == key) return Uri.UnescapeDataString(pair.Substring(eq + 1));
+            }
+            return fallback;
+        }
+
+        private static string HandleAdb(string path, string query)
+        {
+            string adb = FindAdb();
+            if (adb == null)
+            {
+                return "{\"ok\":false,\"error\":\"没找到 adb.exe（装 Android SDK，或把 adb 加进 PATH，或放到 EXE 同目录的 platform-tools 下）\"}";
+            }
+            // 每次请求先确认"哪个服务端口能看到设备"：
+            // 用户可能刚插拔过数据线，或别的程序抢占了默认端口
+            string resolvedPort = ResolveAdbPort(adb);
+            SafeWrite("[adb] 使用服务端口: " + (resolvedPort ?? "(默认 5037)"));
+
+            // 列出设备
+            if (path == "/adb/devices")
+            {
+                var r = RunAdb(adb, "devices -l", 12000);
+                if (r.Item1 != 0)
+                    return "{\"ok\":false,\"error\":\"" + JsonEscape(r.Item3 ?? r.Item2) + "\"}";
+                var items = new List<string>();
+                string[] lines = (r.Item2 ?? "").Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    string line = lines[i].Trim();
+                    if (line.Length == 0) continue;
+                    string[] parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                    string serial = parts.Length > 0 ? parts[0] : "";
+                    string state = parts.Length > 1 ? parts[1] : "";
+                    int mi = line.IndexOf("model:");
+                    string model = "";
+                    if (mi >= 0)
+                    {
+                        int end = line.IndexOf(' ', mi);
+                        model = end > 0 ? line.Substring(mi + 6, end - mi - 6) : line.Substring(mi + 6);
+                    }
+                    items.Add("{\"serial\":\"" + JsonEscape(serial) + "\",\"state\":\"" +
+                              JsonEscape(state) + "\",\"model\":\"" + JsonEscape(model) + "\"}");
+                }
+                return "{\"ok\":true,\"adb\":\"" + JsonEscape(adb) + "\",\"adbPort\":\"" + JsonEscape(_adbServerPort ?? "default") + "\",\"trace\":\"" + JsonEscape(_adbTrace) + "\",\"devices\":[" +
+                       string.Join(",", items.ToArray()) + "]}";
+            }
+
+            // 建立转发
+            if (path == "/adb/connect")
+            {
+                int port = 18765;
+                int.TryParse(QueryValue(query, "port", "18765"), out port);
+                var list = RunAdb(adb, "devices -l", 12000);
+                if (list.Item1 != 0)
+                    return "{\"ok\":false,\"error\":\"" + JsonEscape(list.Item3 ?? list.Item2) + "\"}";
+
+                string serial = null;
+                bool unauthorized = (list.Item2 ?? "").IndexOf("unauthorized", StringComparison.Ordinal) >= 0;
+                string[] lines = (list.Item2 ?? "").Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    string[] parts = lines[i].Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 2 && parts[1] == "device") { serial = parts[0]; break; }
+                }
+                if (serial == null)
+                {
+                    string err = unauthorized
+                        ? "手机未授权 USB 调试：在手机上点「允许」"
+                        : "没检测到 USB 设备（数据线插了吗？USB 调试开了吗？）";
+                    return "{\"ok\":false,\"error\":\"" + JsonEscape(err) + "\"}";
+                }
+
+                var fw = RunAdb(adb, "-s " + serial + " forward tcp:" + port + " tcp:8765", 15000);
+                if (fw.Item1 != 0)
+                    return "{\"ok\":false,\"error\":\"" + JsonEscape(fw.Item3 ?? fw.Item2) + "\"}";
+
+                return "{\"ok\":true,\"adb\":\"" + JsonEscape(adb) + "\",\"serial\":\"" +
+                       JsonEscape(serial) + "\",\"base\":\"127.0.0.1:" + port + "\"}";
+            }
+
+            // 断开转发
+            if (path == "/adb/disconnect")
+            {
+                int port = 18765;
+                int.TryParse(QueryValue(query, "port", "18765"), out port);
+                RunAdb(adb, "forward --remove tcp:" + port, 8000);
+                return "{\"ok\":true}";
+            }
+
+            return "{\"ok\":false,\"error\":\"未知的 /adb 路径\"}";
         }
 
         /// <summary>读到空行为止，返回请求行；同时把请求头丢弃（本服务不需要头信息）。</summary>

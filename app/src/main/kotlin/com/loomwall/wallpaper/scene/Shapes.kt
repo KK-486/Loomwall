@@ -16,7 +16,15 @@ enum class ShapeKind(val jsonName: String, val label: String) {
     TRAPEZOID("trapezoid", "梯形"),
     POLYGON("polygon", "正多边形"),
     STAR("star", "星形"),
-    PATH("path", "SVG 路径");
+    PATH("path", "SVG 路径"),
+
+    /**
+     * 软件容器：默认画一个虚线方框 + 中间加号；绑定应用后画图标 + 名字。
+     *
+     * 为什么放进形状枚举而不是新建节点类型：质心/命中/关键帧/动画/蒙版全都
+     * 作用在 rect 这一套几何上，做成新节点类型相当于把这套逻辑复制一遍。
+     */
+    APPSLOT("appslot", "软件容器");
 
     companion object {
         fun fromJson(name: String?): ShapeKind? =
@@ -63,7 +71,7 @@ object Shapes {
         if (width <= 0f || height <= 0f) return floatArrayOf(0f, 0f)
 
         return when (kind) {
-            ShapeKind.RECT -> {
+            ShapeKind.RECT, ShapeKind.APPSLOT -> {
                 val radius = cornerRadius.coerceIn(0f, minOf(width, height) / 2f)
                 if (radius <= 0.5f) {
                     floatArrayOf(0f, 0f, width, 0f, width, height, 0f, height)

@@ -11,7 +11,9 @@ if (-not (Test-Path $build)) { New-Item -ItemType Directory -Path $build -Force 
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
-$files = @("index.html", "editor.js", "catalog.js", "studio.js", "studio-compile.js")
+# studio-import.js: rules -> workbench migration. Missing it means the packaged exe
+# silently loses the migration (imported presets show an empty workbench).
+$files = @("index.html", "editor.js", "catalog.js", "studio.js", "studio-compile.js", "studio-import.js")
 foreach ($f in $files) {
     $src = Join-Path $root "tools\web-editor\$f"
     if (-not (Test-Path $src)) { throw ("missing editor file: " + $f) }

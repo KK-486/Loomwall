@@ -114,7 +114,19 @@ class PresetHttpServer(
                     }
                     // 走壁纸库：先入库再激活，主页据此多出一张卡片（不再覆盖旧预设）
                     val result = com.loomwall.wallpaper.scene.PresetLibrary(context).import(body)
-                    if (result.ok) com.loomwall.wallpaper.scene.PresetLibrary.notifyChanged(context)
+                    if (result.ok) {
+                        com.loomwall.wallpaper.scene.PresetLibrary.notifyChanged(context)
+                        // 导入成功后立刻让正在运行的壁纸重新读一遍预设。
+                        // 为什么要在进程内发广播：服务里的接收器注册成了 RECEIVER_NOT_EXPORTED，
+                        // 从 adb（不同 uid）发的 RELOAD 会被系统拦掉，只有同进程广播才生效。
+                        runCatching {
+                            context.sendBroadcast(
+                                android.content.Intent(
+                                    com.loomwall.wallpaper.LwpWallpaperService.ACTION_RELOAD
+                                ).setPackage(context.packageName)
+                            )
+                        }.onFailure { Log.w(TAG, "触发重载失败：${it.message}") }
+                    }
 
                     // 回调由宿主实现，可能碰 UI（弹 Toast）——这里必须兜住，
                     // 否则它抛异常会打断后续 respond，浏览器端表现为"传到一半连接被关"

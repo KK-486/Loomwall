@@ -110,7 +110,24 @@ data class RectNode(
      * 图片蒙版：用该资源的 **alpha 通道** 裁剪本元素（空串 = 不用）。
      * 与 mask（形状蒙版）互斥，maskSrc 优先。
      */
-    val maskSrc: String = ""
+    val maskSrc: String = "",
+
+    // ---------------------------------------------------------------- 软件容器（shape = appslot）
+
+    /** 绑定的应用包名。空串 = 还没绑，显示虚线框 + 加号。 */
+    val appPkg: String = "",
+    /** 绑定的应用显示名（存快照，避免每次渲染都查 PackageManager）。 */
+    val appLabel: String = "",
+    /** 图标资源名（presets/active/resources 下的 PNG）。 */
+    val appIcon: String = "",
+    /** 虚线框颜色。 */
+    val borderColor: RgbaColor = RgbaColor(1f, 1f, 1f, 0.8f),
+    /** 虚线框线宽（画布单位）。 */
+    val borderWidth: Float = 0.38f,
+    /** 虚线长度（画布单位）；0 = 实线。 */
+    val dash: Float = 1.8f,
+    /** 加号颜色（未绑定应用时显示）。 */
+    val plusColor: RgbaColor = RgbaColor(1f, 1f, 1f, 0.8f)
 ) : SceneNode
 
 /**

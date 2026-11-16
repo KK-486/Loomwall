@@ -89,7 +89,8 @@ object SceneParser {
         if (!ids.add(id)) throw SceneFormatException("$path/id", "id 重复：\"$id\"")
 
         val visible = optionalBoolean(json, "visible", true, path)
-        val background = parseColorOrNull(json, "background", path) ?: DEFAULT_BACKGROUND
+        val background = parseColorOrNull(json, "background", path)
+            ?: if (isRoot) DEFAULT_BACKGROUND else TRANSPARENT_BACKGROUND
 
         val childrenJson = json.opt("children") as? org.json.JSONArray
             ?: throw SceneFormatException("$path/children", "缺少 children 数组")
@@ -377,6 +378,17 @@ object SceneParser {
             }
         }
 
+        // 软件容器字段：全部可选，缺省就是"未绑定的虚线框"
+        val appPkg = optionalString(json, "appPkg", "", path)
+        val appLabel = optionalString(json, "appLabel", "", path)
+        val appIcon = optionalString(json, "appIcon", "", path)
+        val borderColor = RgbaColor.parseHex(optionalString(json, "borderColor", "#CCFFFFFF", path))
+        val borderWidth = requireNumber(json, "borderWidth", path, required = false, default = 0.38).toFloat()
+        if (borderWidth < 0f) throw SceneFormatException("$path/borderWidth", "不能为负数，收到 $borderWidth")
+        val dash = requireNumber(json, "dash", path, required = false, default = 1.8).toFloat()
+        if (dash < 0f) throw SceneFormatException("$path/dash", "不能为负数，收到 $dash")
+        val plusColor = RgbaColor.parseHex(optionalString(json, "plusColor", "#CCFFFFFF", path))
+
         val sidesRaw = requireNumber(json, "sides", path, required = false, default = 5.0)
         val sides = sidesRaw.toInt()
         if (sides < 3 || sides > 32) {
@@ -404,7 +416,9 @@ object SceneParser {
             cornerRadius = cornerRadius,
             mask = mask,
             maskSides = maskSides,
-            maskSrc = maskSrc, maskX = maskX, maskY = maskY, maskW = maskW, maskH = maskH
+            maskSrc = maskSrc, maskX = maskX, maskY = maskY, maskW = maskW, maskH = maskH,
+            appPkg = appPkg, appLabel = appLabel, appIcon = appIcon,
+            borderColor = borderColor, borderWidth = borderWidth, dash = dash, plusColor = plusColor
         )
     }
 
@@ -474,5 +488,15 @@ object SceneParser {
         }
     }
 
+    /**
+     * 根容器缺省背景：整块画布的底色，同时也是 GL 的 clear color。
+     *
+     * 只有**根**能用这个默认值。嵌套容器如果也用不透明黑，就会出现
+     * "在壁纸里拉一个分组容器，把底下所有图层盖成黑色"的情况 ——
+     * 编辑器画布上容器是透明的，两边表现不一致（用户实测踩到过）。
+     */
     private val DEFAULT_BACKGROUND = RgbaColor.parseHex("#FF0B0D10")
+
+    /** 嵌套容器缺省背景：完全透明，和编辑器画布的行为保持一致。 */
+    private val TRANSPARENT_BACKGROUND = RgbaColor.parseHex("#00000000")
 }

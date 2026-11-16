@@ -11,6 +11,8 @@
     <!-- 音频可视化：Visualizer 抓系统输出混音需要录音权限 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- 调屏幕亮度需要它（特殊权限，用户需在系统设置里手动允许一次） -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <!-- 天气需要定位；不授权时可以改用手动设置的城市（App 抽屉 → 天气城市） -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -67,6 +69,17 @@
             android:exported="true"
             android:label="@string/editor_title"
             android:screenOrientation="landscape"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- 软件容器 → 选择应用。
+             用对话框主题：从桌面点开时视觉上像"浮在壁纸上的一层"，
+             半透明背景能看见底下的容器。 -->
+        <activity
+            android:name=".AppPickerActivity"
+            android:exported="false"
+            android:taskAffinity="com.loomwall.wallpaper.picker"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
             android:windowSoftInputMode="adjustResize" />
 
         <!--

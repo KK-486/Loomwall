@@ -41,4 +41,18 @@ class EffectiveAlphaTest {
         assertEquals(1f, renderer.effectiveAlpha(0.5f, 3f), 0.001f)
         assertEquals(0f, renderer.effectiveAlpha(0.5f, -2f), 0.001f)
     }
+
+    // ---- 分组透明度（交互动动画里"整个面板淡入淡出"依赖它）----
+
+    @Test
+    fun `组透明度是祖先 alpha 与自身 alpha 的乘积`() {
+        val renderer = SceneRenderer()
+        assertEquals(0.5f, renderer.composeAlpha(1f, 0.5f, null), 1e-4f)
+        assertEquals(0.25f, renderer.composeAlpha(0.5f, 0.5f, null), 1e-4f)
+        // 动画覆盖值优先于静态 opacity
+        assertEquals(0.2f, renderer.composeAlpha(0.4f, 0.9f, 0.5f), 1e-4f)
+        // 夹在 0..1
+        assertEquals(1f, renderer.composeAlpha(1f, 1f, null), 1e-4f)
+        assertEquals(0f, renderer.composeAlpha(0f, 1f, null), 1e-4f)
+    }
 }

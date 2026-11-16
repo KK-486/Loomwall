@@ -67,9 +67,20 @@ object SystemVars {
     const val STORAGE_USED_PCT = "sys.storage.usedPct"
     const val STORAGE_FREE_MB = "sys.storage.freeMb"
     const val RENDER_FPS = "sys.render.fps"
+    const val BRIGHTNESS = "sys.brightness"
+    const val VOLUME = "sys.volume"
 
     // 需要用户授权的数据源
     const val NOTIFY_COUNT = "sys.notify.count"
+
+    /** 通知流：当前可见条数（0..4）。 */
+    const val NOTIFY_SHOWN = "sys.notify.shown"
+
+    /** 通知栏为空时为 1，供「暂无消息」直接绑定透明度。 */
+    const val NOTIFY_EMPTY = "sys.notify.empty"
+
+    /** 第 n 条通知（n 从 1 开始）的四个字段名；n 越界表示该槽位没有内容。 */
+    fun notifySlot(n: Int, field: String): String = "sys.notify." + n + "." + field
     const val MEDIA_TITLE = "sys.media.title"
     const val MEDIA_ARTIST = "sys.media.artist"
     const val MEDIA_ALBUM = "sys.media.album"
@@ -78,6 +89,8 @@ object SystemVars {
     const val MEDIA_POSITION = "sys.media.position"
     const val MEDIA_DURATION = "sys.media.duration"
     const val MEDIA_PROGRESS = "sys.media.progress"
+    const val MEDIA_POS_TEXT = "sys.media.posText"
+    const val MEDIA_DUR_TEXT = "sys.media.durText"
     const val MEDIA_LYRIC = "sys.media.lyric"
     const val MEDIA_LYRIC_TRANS = "sys.media.lyricTrans"
     const val MEDIA_LYRIC_NEXT = "sys.media.lyricNext"
@@ -107,6 +120,22 @@ object SystemVars {
     const val WEATHER_CITY = "sys.weather.city"
     const val WEATHER_DISTRICT = "sys.weather.district"
 
+    /**
+     * 多日预报：0=昨天 1=今天 2=明天 3=后天 4=大后天。
+     *
+     * 用「天名」而不是 day0/day1 做变量名，预设里写 `{sys.weather.tmr.max}`
+     * 比 `{sys.weather.day2.max}` 更容易看懂，也不容易错位。
+     */
+    val WEATHER_DAY_NAMES = listOf("yday", "today", "tmr", "d2", "d3")
+
+    /** 未来 6 小时最大降水概率（%）与累计降水（mm），用于降雨提醒。 */
+    const val WEATHER_RAIN_SOON = "sys.weather.rainSoon"
+    const val WEATHER_RAIN_MM = "sys.weather.rainMm"
+
+    /** 今日日出 / 日落时刻，如 "06:39"。 */
+    const val WEATHER_SUNRISE = "sys.weather.sunrise"
+    const val WEATHER_SUNSET = "sys.weather.sunset"
+
     /** UI 用：变量名 → 中文说明。 */
     val LABELS: Map<String, String> = linkedMapOf(
         TIME_HOUR to "小时（0-23）",
@@ -122,7 +151,11 @@ object SystemVars {
         STORAGE_USED_PCT to "存储占用（%）",
         STORAGE_FREE_MB to "可用存储（MB）",
         RENDER_FPS to "实际帧率",
+        BRIGHTNESS to "屏幕亮度（0~100）",
+        VOLUME to "媒体音量（0~100）",
         NOTIFY_COUNT to "未读通知条数",
+        NOTIFY_SHOWN to "通知流可见条数（0~4）",
+        NOTIFY_EMPTY to "通知栏是否为空（1/0）",
         MEDIA_TITLE to "正在播放的歌曲",
         MEDIA_ARTIST to "歌手",
         MEDIA_ALBUM to "专辑",
@@ -131,6 +164,8 @@ object SystemVars {
         MEDIA_POSITION to "播放位置（秒）",
         MEDIA_DURATION to "歌曲总长（秒）",
         MEDIA_PROGRESS to "播放进度（0-100）",
+        MEDIA_POS_TEXT to "播放位置（mm:ss）",
+        MEDIA_DUR_TEXT to "总时长（mm:ss）",
         MEDIA_LYRIC to "当前歌词",
         MEDIA_LYRIC_TRANS to "当前歌词译文",
         MEDIA_LYRIC_NEXT to "下一句歌词",
